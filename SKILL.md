@@ -13,7 +13,7 @@ Security health check and recurring assessment for self-hosted OpenClaw installa
 ## Install
 
 ```bash
-clawhub install clawvitals
+npx clawhub install clawvitals
 ```
 
 Or via OpenClaw directly:

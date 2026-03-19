@@ -7,7 +7,7 @@ Finds real misconfigurations. Tracks whether your security posture improves or r
 ## Install
 
 ```bash
-clawhub install clawvitals
+npx clawhub install clawvitals
 ```
 
 ## Quick start
