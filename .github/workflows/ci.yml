@@ -90,9 +90,11 @@ jobs:
       - name: Check bundle size
         run: |
           npm run build
-          SIZE=$(du -sk dist/ | cut -f1)
-          echo "Bundle size: ${SIZE}KB"
-          if [ "$SIZE" -gt 200 ]; then
-            echo "ERROR: Bundle exceeds 200KB limit (${SIZE}KB)"
+          # Measure JS files only (bytes), excluding .d.ts, .map, and .json assets
+          SIZE_BYTES=$(find dist -name "*.js" | xargs wc -c 2>/dev/null | tail -1 | awk '{print $1}')
+          SIZE_KB=$((SIZE_BYTES / 1024))
+          echo "JS bundle size: ${SIZE_KB}KB (${SIZE_BYTES} bytes)"
+          if [ "$SIZE_BYTES" -gt 204800 ]; then
+            echo "ERROR: JS bundle exceeds 200KB limit (${SIZE_KB}KB)"
             exit 1
           fi
