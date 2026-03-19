@@ -6,3 +6,8 @@ dist/
 *.plaintext.yaml
 .DS_Store
 coverage/
+
+# Don't ship to clawhub
+.specs/
+tests/
+*.test.ts
