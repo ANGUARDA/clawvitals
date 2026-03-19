@@ -1,7 +1,7 @@
 /**
  * cli-runner.ts — Single, auditable wrapper around all OpenClaw CLI exec calls.
  *
- * This is the ONLY place in the codebase that invokes child_process.execFile.
+ * This is the ONLY place in the codebase that invokes system commands.
  * Every collector MUST use CliRunner — never call exec directly. This module
  * enforces the binary allowlist, argument-as-array safety, and timeout policy.
  */
