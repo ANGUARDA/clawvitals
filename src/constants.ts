@@ -71,7 +71,7 @@ export const HISTORY_DEFAULT_LIMIT = 10;
 export const DEFAULT_RETENTION_DAYS = 90;
 
 /** Binaries allowed to be executed by CliRunner */
-export const ALLOWED_BINARIES: readonly string[] = ['openclaw', 'node'] as const;
+export const ALLOWED_BINARIES: readonly string[] = ['openclaw'] as const;
 
 /** Default telemetry endpoint (HTTPS only) */
 export const DEFAULT_TELEMETRY_ENDPOINT = 'https://telemetry.clawvitals.io/ping';
