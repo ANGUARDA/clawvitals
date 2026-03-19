@@ -82,3 +82,15 @@ ClawVitals is built and maintained by [Anguarda](https://anguarda.com) — AI ag
 - GitHub: [github.com/ANGUARDA/Portfolio](https://github.com/ANGUARDA/Portfolio)
 - Docs: [clawvitals.io/docs](https://clawvitals.io/docs)
 - Control library: [clawvitals.io/docs/controls](https://clawvitals.io/docs/controls)
+
+## Security & Privacy
+
+ClawVitals is designed with security as a first principle:
+
+**What it executes:** Only `openclaw` CLI subcommands (security-audit, health, update, version, cron). The binary allowlist is enforced at construction time — any other binary throws immediately. Args are passed as arrays, never interpolated into shell strings.
+
+**Network access:** One optional outbound connection — `telemetry.clawvitals.io/ping` — a GET request sent only when you explicitly run `clawvitals telemetry on`. Off by default. No findings, paths, hostnames, or secrets are ever transmitted.
+
+**Local storage:** Config, usage state, and session tokens are stored in your OpenClaw workspace with chmod 600 (user-read only). The `link` command stores an org token locally for optional dashboard access — it is never included in scan reports or telemetry.
+
+**Source code:** Fully open source, MIT licensed. Read it: https://github.com/ANGUARDA/clawvitals-skill

@@ -6,7 +6,6 @@
  * enforces the binary allowlist, argument-as-array safety, and timeout policy.
  */
 
-import { execFile } from 'node:child_process';
 import { ALLOWED_BINARIES, CLI_TIMEOUT_MS } from './constants';
 
 /** Thrown when a CLI command exceeds its timeout */
@@ -99,6 +98,7 @@ export class CliRunner {
     args: string[],
     options: CliRunOptions = {}
   ): Promise<CliRunResult> {
+    const { execFile } = await import('node:child_process');
     const timeoutMs = options.timeoutMs ?? CLI_TIMEOUT_MS;
 
     return new Promise<CliRunResult>((resolve, reject) => {
