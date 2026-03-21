@@ -4,7 +4,6 @@ description: Check your OpenClaw security vitals. Scans your installation, score
 homepage: https://clawvitals.io
 tags: [security, audit, health-check, openclaw, monitoring]
 metadata: {"openclaw": {"requires": {}, "minVersion": "2026.3.0"}}
-disable-model-invocation: true
 ---
 
 # ClawVitals
