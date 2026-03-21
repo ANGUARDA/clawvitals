@@ -1,8 +1,8 @@
 ---
 name: clawvitals
-description: Check your OpenClaw security vitals. Scans your installation, scores your setup, and shows you exactly what to fix. First scan in seconds.
+description: Security vitals checker for OpenClaw. Scans your installation, scores your setup, and shows you exactly what to fix. First scan in seconds.
 homepage: https://clawvitals.io
-tags: [security, audit, health-check, openclaw, monitoring]
+tags: [security, audit, health-check, openclaw, monitoring, vitals, security-vitals]
 metadata: {"openclaw": {"requires": {}, "minVersion": "2026.3.0"}}
 ---
 
