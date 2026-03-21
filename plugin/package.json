@@ -1,0 +1,11 @@
+{
+  "name": "@anguarda/clawvitals",
+  "version": "0.0.0",
+  "description": "ClawVitals plugin for OpenClaw — coming soon",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ANGUARDA/clawvitals.git"
+  },
+  "license": "MIT"
+}
