@@ -18,7 +18,7 @@ if [ -z "$VERSION" ] || [ -z "$CHANGELOG" ]; then
   exit 1
 fi
 
-SKILL_DIR="$(dirname "$0")/../skill"
+SKILL_DIR="$(cd "$(dirname "$0")/.." SKILL_DIR="$(dirname "$0")/../skill"SKILL_DIR="$(dirname "$0")/../skill" pwd)/skill"
 
 # Update skill.json version
 python3 -c "
