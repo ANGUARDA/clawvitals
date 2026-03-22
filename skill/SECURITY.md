@@ -13,7 +13,7 @@ No other commands are issued. Args are never interpolated into shell strings.
 
 ## Network access
 
-None. This skill has no outbound network permissions. No data leaves your machine.
+This skill declares no outbound network permissions and makes no network calls itself. Note: `openclaw update status --json` (one of the five commands this skill runs) may cause the OpenClaw CLI to contact its update registry. That is OpenClaw's own behaviour — the skill does not initiate or control it.
 
 ## Local storage
 
