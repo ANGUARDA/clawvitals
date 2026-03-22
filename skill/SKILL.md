@@ -31,6 +31,8 @@ When the user says "run clawvitals" or similar, execute ALL of the following com
 
 **Only report findings that are directly supported by the collected command output. Do not infer, guess, or invent checks that are not explicitly covered below. If a check cannot be evaluated reliably, report it as ➖ N/A rather than guessing.**
 
+**Do not reproduce raw CLI output in your response. Extract only the specific fields needed to evaluate each control. Never display API keys, tokens, credentials, secrets, or sensitive values that may appear in command output.**
+
 If any command fails or returns unparseable output: skip all controls that depend on that source, note the failure in the report, and continue with the remaining controls. Do not abort the scan.
 
 ### Step 1 — Collect data
