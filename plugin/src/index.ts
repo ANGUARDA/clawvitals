@@ -56,6 +56,9 @@ import { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS } from './intents.js';
 import { PluginTelemetryClient } from './telemetry.js';
 import { evaluateAlert, resolveAlertConfig } from './alerts.js';
 import type { ScanSnapshot } from './alerts.js';
+import { scanCognitiveFiles } from './cognitive/inventory.js';
+import { approveFile } from './cognitive/drift.js';
+import { getLatestReport } from './cognitive/export.js';
 
 export * from './plugin-config.js';
 export * from './telemetry.js';
@@ -272,7 +275,15 @@ async function runManualScan(workspaceDir: string, detailed: boolean): Promise<s
     : formatSummary(report, delta, staleExclusions);
   const dashboardLine = `\n📊 View your dashboard: https://clawvitals.io/dashboard`;
 
-  return `${header}\n\n${body}${dashboardLine}`;
+  let output = `${header}\n\n${body}${dashboardLine}`;
+
+  // Heartbeat suggestion on first scan
+  if (pluginState.total_pings === 1) {
+    const interval = 30;
+    output += `\n\n💡 Tip: Add this to your HEARTBEAT.md for automatic checks every ${interval} minutes:\n- Run clawvitals and report any new issues since last check`;
+  }
+
+  return output;
 }
 
 function nextCronDescription(cron: string, enabled: boolean): string {
@@ -814,6 +825,85 @@ const clawvitalsPlugin = {
         return textResult(out);
       },
     }), { names: ['clawvitals_exclusions'] });
+
+    // ── clawvitals_approve_baseline ─────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_approve_baseline',
+      label: 'ClawVitals: Approve Cognitive Baseline',
+      description:
+        'Approve a cognitive file (or all files) into the drift-detection baseline. ' +
+        'Pass filename="all" to approve every file in the current inventory.',
+      parameters: Type.Object({
+        filename: Type.String({
+          description: 'Name of the cognitive file to approve (e.g. "SOUL.md"), or "all" to approve everything.',
+        }),
+      }),
+      execute: async (_id: string, params: { filename: string }) => {
+        const workspaceDir = resolveWorkspaceDir();
+        const inventory = scanCognitiveFiles(workspaceDir);
+
+        if (inventory.error) {
+          return textResult(`❌ Could not scan workspace: ${inventory.error}`);
+        }
+
+        if (inventory.files.length === 0) {
+          return textResult('No cognitive files found in workspace. Nothing to approve.');
+        }
+
+        if (params.filename === 'all') {
+          for (const file of inventory.files) {
+            approveFile(workspaceDir, file.name, inventory, 'plugin');
+          }
+          return textResult(
+            `✅ Approved ${inventory.files.length} file(s) into baseline:\n` +
+            inventory.files.map(f => `  • ${f.name}`).join('\n')
+          );
+        }
+
+        const match = inventory.files.find(f => f.name === params.filename);
+        if (!match) {
+          return textResult(
+            `❌ File "${params.filename}" not found in inventory. Available files:\n` +
+            inventory.files.map(f => `  • ${f.name}`).join('\n')
+          );
+        }
+
+        approveFile(workspaceDir, params.filename, inventory, 'plugin');
+        return textResult(`✅ Approved "${params.filename}" (sha256: ${match.sha256.slice(0, 12)}…) into baseline.`);
+      },
+    }), { names: ['clawvitals_approve_baseline'] });
+
+    // ── clawvitals_export ────────────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_export',
+      label: 'ClawVitals: Export Scan Report',
+      description:
+        'Export the most recent ClawVitals scan report. Returns the report content ' +
+        'in markdown format (default) or the directory path.',
+      parameters: Type.Object({
+        format: Type.Optional(Type.Union([
+          Type.Literal('markdown'),
+          Type.Literal('path'),
+        ], {
+          description: 'Output format: "markdown" (default) returns report content, "path" returns directory path.',
+        })),
+      }),
+      execute: async (_id: string, params: { format?: 'markdown' | 'path' }) => {
+        const workspaceDir = resolveWorkspaceDir();
+        const format = params.format ?? 'markdown';
+        const result = getLatestReport(workspaceDir, format);
+
+        if (!result.found) {
+          return textResult(result.message ?? 'No scan history yet. Run clawvitals first.');
+        }
+
+        if (format === 'path') {
+          return textResult(`📁 Latest scan directory: ${result.path}`);
+        }
+
+        return textResult(result.content ?? '');
+      },
+    }), { names: ['clawvitals_export'] });
 
     // ── Scan intent + cron hook ───────────────────────────────────────────
     //
