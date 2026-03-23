@@ -52,6 +52,7 @@ import { formatSummary } from './reporting/summary.js';
 import { formatDetail } from './reporting/detail.js';
 import type { DeltaResult } from './types.js';
 import { CRON_JOB_NAME, PLUGIN_VERSION } from './constants.js';
+import { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS } from './intents.js';
 import { PluginTelemetryClient } from './telemetry.js';
 import { evaluateAlert, resolveAlertConfig } from './alerts.js';
 import type { ScanSnapshot } from './alerts.js';
@@ -222,23 +223,8 @@ function pluginHeader(): string {
 // Mirror the patterns from the ClawHub skill's skill.json intents so that
 // the plugin intercepts them before the skill (or LLM) gets a chance.
 
-const SCAN_PATTERNS = [
-  'run clawvitals',
-  'clawvitals scan',
-  'check clawvitals',
-  'clawvitals check',
-];
-
-const DETAIL_PATTERNS = [
-  'show clawvitals details',
-  'clawvitals full report',
-  'clawvitals details',
-];
-
-function matchesIntent(prompt: string, patterns: string[]): boolean {
-  const normalised = prompt.trim().toLowerCase();
-  return patterns.some(p => normalised.startsWith(p));
-}
+// Re-export for convenience (consumers can import from either location)
+export { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS } from './intents.js';
 
 // ── Manual scan runner ────────────────────────────────────────────────────
 

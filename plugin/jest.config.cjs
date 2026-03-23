@@ -15,7 +15,7 @@ const sdkPath = (() => {
 // by Jest's CommonJS transformer. We stub it out with a lightweight mock.
 // The real SDK is used at runtime inside OpenClaw's process.
 const moduleNameMapper = {
-  '^@openclaw/plugin-sdk$': '<rootDir>/tests/__mocks__/openclaw-plugin-sdk.js',
+  '^@openclaw/plugin-sdk$': '<rootDir>/tests/__mocks__/openclaw-plugin-sdk.cjs',
 };
 
 module.exports = {
