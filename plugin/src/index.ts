@@ -1,377 +1,528 @@
 /**
- * index.ts — Intent router for the ClawVitals OpenClaw skill.
+ * index.ts — ClawVitals plugin entry point.
  *
- * This is the skill entry point. It receives intent-routed messages from
- * OpenClaw and dispatches them to the appropriate handler. Each handler
- * is a thin wrapper that constructs dependencies and delegates to the
- * relevant module.
+ * This plugin extends ClawVitals (the skill) with:
+ *   - Recurring scheduled scans (cron)
+ *   - Posture history stored locally and synced to clawvitals.io/dashboard
+ *   - Regression and critical finding alerts via OpenClaw messaging
+ *   - Fleet management via user-set installation aliases
+ *
+ * PLUGIN PATTERN:
+ *   External OpenClaw plugins export a plain object (or function) with a
+ *   `register(api: OpenClawPluginApi)` method. Tools implement the AgentTool
+ *   interface from @mariozechner/pi-agent-core:
+ *     { name, label, description, parameters (TSchema), execute(toolCallId, params) }
+ *
+ * TELEMETRY DEFAULT:
+ *   Unlike the skill (opt-in), the plugin defaults telemetry to ON.
+ *   Rationale: users install the plugin to see posture on clawvitals.io/dashboard.
+ *   Telemetry IS the product. Users can opt out at any time.
+ *
+ * ALIAS:
+ *   Users/agents can set a human-readable alias (e.g. "prod-server-1") for
+ *   fleet management on the dashboard. NEVER derived from machine identifiers.
  */
 
-import { CliRunner } from './cli-runner';
-import { CollectorOrchestrator } from './collectors';
-import { ControlEvaluator } from './controls/evaluator';
-import { loadControlLibrary } from './controls/library';
-import { Scorer } from './scoring';
-import { DeltaDetector } from './scoring/delta';
-import { ReportGenerator } from './reporting';
-import { StorageManager } from './reporting/storage';
-import { ConfigManager } from './config';
-import { TelemetryClient } from './telemetry';
-import { SchedulerManager } from './scheduling';
-import { ScanOrchestrator } from './orchestrator';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { Type } from '@sinclair/typebox';
+import type { Static, TSchema } from '@sinclair/typebox';
+import type { OpenClawPluginApi } from 'openclaw/plugin-sdk/core';
+import { emptyPluginConfigSchema } from 'openclaw/plugin-sdk/core';
+import { validateAlias, formatInstallDisplay } from './alias.js';
+import { validateCron, DEFAULT_CRON } from './scheduler.js';
+import type { PluginConfig, PluginInstallState, TrialReminderPayload, TrialStatus } from './types.js';
 
-import { formatDetail } from './reporting/detail';
-import { formatSummary } from './reporting/summary';
-import { SKILL_VERSION, LIBRARY_VERSION, ALERT_TOP_FINDINGS } from './constants';
-import type { Severity } from './types';
+export * from './types.js';
+export * from './telemetry.js';
+export * from './scheduler.js';
+export * from './alerts.js';
+export * from './alias.js';
 
-/**
- * Build the full dependency tree for a scan.
- * Uses a consistent workspace directory for all operations.
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @returns Object containing orchestrator, config, storage, and scheduler instances
- */
-function buildDependencies(workspaceDir: string): {
-  orchestrator: ScanOrchestrator;
-  config: ConfigManager;
-  storage: StorageManager;
-  scheduler: SchedulerManager;
-} {
-  const cli = new CliRunner('openclaw');
-  const collector = new CollectorOrchestrator(cli);
-  const config = new ConfigManager(workspaceDir);
-  const exclusions = config.getExclusions();
-  const library = loadControlLibrary();
-  const evaluator = new ControlEvaluator(library, exclusions);
-  const scorer = new Scorer();
-  const delta = new DeltaDetector();
-  const storage = new StorageManager(workspaceDir);
-  const reporter = new ReportGenerator(storage);
-  const telemetry = new TelemetryClient();
-  const scheduler = new SchedulerManager(cli);
+// ── State file (persisted to plugin data dir) ──────────────────────────────
 
-  const orchestrator = new ScanOrchestrator(
-    collector, evaluator, scorer, delta, reporter,
-    storage, config, telemetry, scheduler, workspaceDir
-  );
+const PLUGIN_DIR = path.join(os.homedir(), '.openclaw', 'plugins', 'clawvitals');
+const CONFIG_FILE = path.join(PLUGIN_DIR, 'config.json');
+const STATE_FILE  = path.join(PLUGIN_DIR, 'state.json');
 
-  return { orchestrator, config, storage, scheduler };
+function ensureDir(): void {
+  if (!fs.existsSync(PLUGIN_DIR)) {
+    fs.mkdirSync(PLUGIN_DIR, { recursive: true, mode: 0o700 });
+  }
 }
 
-/**
- * Handle a manual scan request.
- * Intent patterns: "run clawvitals", "clawvitals scan", "check clawvitals"
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @returns Formatted summary message including score, band, delta, and optional first-run prompts
- */
-export async function handleScan(workspaceDir: string): Promise<string> {
-  const { orchestrator, config } = buildDependencies(workspaceDir);
-  const isFirstRun = config.isFirstRun();
-
-  let output = '';
-  if (isFirstRun) {
-    output += '\u{1F44B} Welcome to ClawVitals \u{2014} your OpenClaw security health check.\n\n';
-    output += 'Running your first scan now...\n\n';
+function loadConfig(): PluginConfig {
+  ensureDir();
+  try {
+    const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
+    return JSON.parse(raw) as PluginConfig;
+  } catch {
+    return {};
   }
-
-  const report = await orchestrator.run({ isScheduled: false });
-
-  // Use the delta already computed by the orchestrator (before the run was stored),
-  // not a re-computation which would compare the report against itself.
-  const staleExclusions = config.hasStaleExclusions();
-  output += formatSummary(report, report.dock_analysis.delta, staleExclusions);
-
-  if (isFirstRun) {
-    output += '\n\n---\n';
-    output += '\u{1F4C5} Set up recurring scans? Reply with one of:\n';
-    output += '  \u{2022} "clawvitals schedule daily"\n';
-    output += '  \u{2022} "clawvitals schedule weekly"\n';
-    output += '  \u{2022} "clawvitals schedule monthly"\n';
-    output += '  \u{2022} "clawvitals schedule off" (manual only)\n';
-  }
-
-  const usage = config.getUsage();
-  if (usage.telemetry_prompt_state === 'not_shown') {
-    output += '\n\n\u{1F4CA} Want to track your security posture over time?\n\n';
-    output += 'Enable anonymous scan summaries to help improve ClawVitals. Dashboard coming soon at clawvitals.io/dashboard. ';
-    output += 'No findings, file paths, or secrets are ever shared.\n\n';
-    output += 'Reply "clawvitals telemetry on" to enable, or ignore to skip.';
-  }
-
-  return output;
 }
 
-/**
- * Handle a detail report request.
- * Intent patterns: "show clawvitals details", "clawvitals full report"
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @returns Full detail report string, or a prompt to run a scan first if no data exists
- */
-export function handleDetail(workspaceDir: string): string {
-  const { config, storage } = buildDependencies(workspaceDir);
-  const lastRun = storage.loadLastRun();
+function saveConfig(config: PluginConfig): void {
+  ensureDir();
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
+}
 
-  if (!lastRun) {
-    return 'No scan found \u{2014} run "run clawvitals" first.';
+function loadState(): PluginInstallState {
+  ensureDir();
+  try {
+    const raw = fs.readFileSync(STATE_FILE, 'utf8');
+    return JSON.parse(raw) as PluginInstallState;
+  } catch {
+    // First run — generate install identity
+    const state: PluginInstallState = {
+      install_id: randomUUID(),
+      installed_at: new Date().toISOString(),
+      total_pings: 0,
+      last_ping_at: null,
+    };
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), { mode: 0o600 });
+    return state;
   }
+}
 
-  const delta = lastRun.dock_analysis.delta;
+function saveState(state: PluginInstallState): void {
+  ensureDir();
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), { mode: 0o600 });
+}
 
-  config.updateUsage({
-    detail_requests: config.getUsage().detail_requests + 1,
+function nextCronDescription(cron: string, enabled: boolean): string {
+  if (!enabled) return 'N/A (disabled)';
+  if (cron === DEFAULT_CRON) return 'daily at 9:00 AM';
+  return `per schedule: \`${cron}\``;
+}
+
+// ── Agent API helpers ──────────────────────────────────────────────────────
+
+const AGENT_API_BASE = 'https://clawvitals-agent-api.workers.dev';
+
+function getAgentToken(): string | null {
+  const state = loadState();
+  // Agent session token stored in state (set by skill during link flow)
+  return (state as PluginInstallState & { agent_session_token?: string }).agent_session_token ?? null;
+}
+
+async function agentGet(path: string): Promise<Response> {
+  const token = getAgentToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch(`${AGENT_API_BASE}${path}`, { method: 'GET', headers });
+}
+
+async function agentPost(path: string, body: Record<string, unknown> = {}): Promise<Response> {
+  const token = getAgentToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch(`${AGENT_API_BASE}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
   });
-
-  return formatDetail(lastRun, delta);
 }
 
-/**
- * Handle a history request.
- * Intent pattern: "clawvitals history"
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @returns Formatted table of recent scan runs, or a prompt to run a scan first
- */
-export function handleHistory(workspaceDir: string): string {
-  const { storage } = buildDependencies(workspaceDir);
-  const runs = storage.listRuns(10);
+// ── Trial webhook handler (exported for skill use) ─────────────────────────
 
-  if (runs.length === 0) {
-    return 'No scan history found \u{2014} run "run clawvitals" first.';
+/**
+ * Generate an agent nudge message from a trial reminder webhook payload.
+ * Export for OpenClaw skill to call when it receives the webhook.
+ */
+export function handleTrialWebhook(payload: TrialReminderPayload): string {
+  if (payload.type === 'trial_expired') {
+    return (
+      "Your ClawVitals Pro trial has ended. You're now on the Free plan — " +
+      "I'll keep running scans on your primary instance. To restore fleet access " +
+      "and full history, say 'upgrade ClawVitals' and I'll sort it."
+    );
   }
 
-  const lines: string[] = ['\u{1F4CB} ClawVitals Scan History\n'];
-  lines.push('Date                     | Score | Band   | Type');
-  lines.push('-------------------------|-------|--------|----------');
-
-  for (const run of runs) {
-    const scoreStr = run.score !== null ? String(run.score).padStart(5) : '  N/A';
-    const bandStr = (run.band ?? 'N/A').padEnd(6);
-    const typeStr = run.is_scheduled ? 'scheduled' : 'manual';
-    lines.push(`${run.scan_ts.padEnd(25)}| ${scoreStr} | ${bandStr} | ${typeStr}`);
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Handle a schedule configuration request.
- * Intent patterns: "clawvitals schedule daily/weekly/monthly/off"
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @param message - The user's message containing the desired schedule cadence
- * @returns Confirmation message indicating the new schedule state
- */
-export async function handleSchedule(
-  workspaceDir: string,
-  message: string
-): Promise<string> {
-  const { scheduler, config } = buildDependencies(workspaceDir);
-
-  const cadenceMatch = /schedule\s+(daily|weekly|monthly|off)/i.exec(message);
-  const rawCadence = cadenceMatch?.[1]?.toLowerCase() ?? 'weekly';
-
-  const normalizedCadence = (rawCadence === 'off' ? 'none' : rawCadence) as 'daily' | 'weekly' | 'monthly' | 'none';
-  await scheduler.ensureSchedule(normalizedCadence);
-
-  if (normalizedCadence === 'none') {
-    config.updateUsage({ schedule_enabled: false });
-    return '\u{2705} Recurring scans disabled. Run "clawvitals scan" for manual scans.';
-  }
-
-  config.updateUsage({ schedule_enabled: true });
-  return `\u{2705} Recurring ${rawCadence} scans enabled. You'll be alerted on new critical/high findings.`;
-}
-
-/**
- * Handle a scheduled scan (invoked by cron).
- * Only delivers an alert if there are new critical/high findings.
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @returns Alert message string if new critical/high findings exist, or null if no alert is needed
- */
-export async function handleScheduledScan(workspaceDir: string): Promise<string | null> {
-  const { orchestrator } = buildDependencies(workspaceDir);
-  const report = await orchestrator.run({ isScheduled: true });
-
-  // Only alert if new critical/high stable findings
-  const newCritHigh = report.dock_analysis.delta.new_findings.filter(
-    f => f.status === 'stable' && (f.severity === 'critical' || f.severity === 'high')
-  );
-
-  if (newCritHigh.length === 0) return null;
-
-  // Format alert with top findings
-  const topFindings = newCritHigh
-    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
-    .slice(0, ALERT_TOP_FINDINGS);
-
-  let alert = `\u{1F6A8} ClawVitals Alert \u{2014} ${report.meta.host_name}\n`;
-  alert += `New findings since last scan: ${newCritHigh.length}\n\n`;
-
-  topFindings.forEach((f, i) => {
-    alert += `${i + 1}. [${f.control_id}] ${f.control_name} \u{2014} ${f.severity.toUpperCase()}\n`;
-    if (f.remediation) {
-      alert += `   Fix: ${f.remediation}\n`;
-    }
-  });
-
-  alert += '\nFull report: run "show clawvitals details"';
-
-  return alert;
-}
-
-/**
- * Handle a telemetry toggle request.
- * Intent patterns: "clawvitals telemetry on/off"
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @param message - The user's message containing "on" or "off"
- * @returns Confirmation message indicating the new telemetry state
- */
-export function handleTelemetry(workspaceDir: string, message: string): string {
-  const { config } = buildDependencies(workspaceDir);
-  const enable = message.toLowerCase().includes('on');
-
-  config.setConfig({ telemetry_enabled: enable });
-  config.updateUsage({
-    telemetry_prompt_state: enable ? 'accepted' : 'declined',
-  });
-
-  return enable
-    ? '\u{2705} Telemetry enabled. Your anonymous scan summaries will help us improve ClawVitals.'
-    : '\u{2705} Telemetry disabled.';
-}
-
-/**
- * Handle a config update request.
- * Intent pattern: "clawvitals config {key} {value}"
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @param message - The user's message containing the config key and value
- * @returns Confirmation message, current config dump, or validation error
- */
-export function handleConfig(workspaceDir: string, message: string): string {
-  const { config } = buildDependencies(workspaceDir);
-
-  const configMatch = /config\s+(\S+)\s+(.+)/i.exec(message);
-  if (!configMatch?.[1] || !configMatch[2]) {
-    const current = config.getConfig();
-    return `Current configuration:\n${JSON.stringify(current, null, 2)}`;
-  }
-
-  const key = configMatch[1];
-  const value = configMatch[2].trim();
-
-  const allowedKeys = ['host_name', 'retention_days', 'alert_threshold'];
-  if (!allowedKeys.includes(key)) {
-    return `Unknown config key "${key}". Allowed keys: ${allowedKeys.join(', ')}`;
-  }
-
-  if (key === 'retention_days') {
-    const num = parseInt(value, 10);
-    if (isNaN(num) || num < 1) {
-      return 'retention_days must be a positive number.';
-    }
-    config.setConfig({ retention_days: num });
-  } else if (key === 'alert_threshold') {
-    const validThresholds: Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
-    if (!validThresholds.includes(value as Severity)) {
-      return `alert_threshold must be one of: ${validThresholds.join(', ')}`;
-    }
-    config.setConfig({ alert_threshold: value as Severity });
-  } else {
-    config.setConfig({ [key]: value });
-  }
-
-  return `\u{2705} Configuration updated: ${key} = ${value}`;
-}
-
-/**
- * Handle a status request.
- * Intent pattern: "clawvitals status"
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @returns Formatted status summary including host, version, score, and feature states
- */
-export function handleStatus(workspaceDir: string): string {
-  const { config } = buildDependencies(workspaceDir);
-  const cvConfig = config.getConfig();
-  const usage = config.getUsage();
-
-  const lines: string[] = ['\u{1F3E5} ClawVitals Status\n'];
-  lines.push(`Host: ${cvConfig.host_name}`);
-  lines.push(`Skill version: ${SKILL_VERSION}`);
-  lines.push(`Library version: ${LIBRARY_VERSION}`);
-  lines.push(`Total scans: ${usage.total_runs}`);
-  lines.push(`Last scan: ${usage.last_run_at ?? 'never'}`);
-  lines.push(`Last score: ${usage.last_score_band ?? 'N/A'}`);
-  lines.push(`Schedule: ${usage.schedule_enabled ? 'enabled' : 'disabled'}`);
-  lines.push(`Telemetry: ${cvConfig.telemetry_enabled ? 'enabled' : 'disabled'}`);
-
-
-  return lines.join('\n');
-}
-
-/**
- * Handle an exclusion management request.
- * Intent patterns: "clawvitals exclude NC-XXX-NNN ...", "clawvitals exclusions"
- *
- * @param workspaceDir - Absolute path to the OpenClaw workspace directory
- * @param message - The user's message containing the exclusion command or "exclusions" to list
- * @returns Exclusion list, confirmation of new exclusion, or usage instructions
- */
-export function handleExclusions(workspaceDir: string, message: string): string {
-  const { config } = buildDependencies(workspaceDir);
-
-  // List exclusions
-  if (/exclusions$/i.test(message.trim())) {
-    const exclusions = config.getExclusions();
-    if (exclusions.length === 0) {
-      return 'No active exclusions.';
-    }
-
-    const lines = ['\u{1F4CB} Active Exclusions:\n'];
-    for (const ex of exclusions) {
-      const active = config.isExclusionActive(ex) ? '\u{2705}' : '\u{274C} expired';
-      lines.push(`${active} ${ex.controlId}: ${ex.reason}`);
-      if (ex.expires) {
-        lines.push(`   Expires: ${ex.expires}`);
+  const featureList = payload.features_at_risk
+    .map(f => {
+      switch (f) {
+        case 'fleet_view': return 'fleet view';
+        case 'pdf_reports': return 'PDF reports';
+        case '90_day_history': return '90-day history';
+        default: return f;
       }
-    }
-    return lines.join('\n');
+    })
+    .join(', ');
+
+  if (payload.days_remaining === 9) {
+    return (
+      `Quick heads up — your ClawVitals Pro trial has 9 days left. ` +
+      `You've been using ${featureList}. ` +
+      `If you'd like to keep those, I can set up your subscription now. ` +
+      `Want me to handle it, or remind you closer to the deadline?`
+    );
   }
 
-  // Add exclusion: "clawvitals exclude NC-XXX-NNN reason 'some reason'"
-  const excludeMatch = /exclude\s+(NC-[A-Z]+-\d{3})\s+(?:for\s+\S+\s+)?(?:reason\s+)?['"]?(.+?)['"]?\s*$/i.exec(message);
-  if (!excludeMatch?.[1]) {
-    return 'Usage: clawvitals exclude NC-XXX-NNN reason "your reason"';
+  if (payload.days_remaining === 3) {
+    return (
+      `ClawVitals trial ends in 3 days. You currently have ${payload.instance_count} instance${payload.instance_count !== 1 ? 's' : ''} linked — ` +
+      `on Free you'd keep 1. Want to upgrade? I can walk you through it now. ` +
+      `It takes about 2 minutes.`
+    );
   }
 
-  config.addExclusion({
-    controlId: excludeMatch[1],
-    reason: excludeMatch[2] ?? 'No reason provided',
-    created_at: new Date().toISOString(),
-  });
+  if (payload.days_remaining === 1) {
+    const scoreStr = payload.current_score !== null
+      ? `${payload.current_score}/100 (${payload.current_band ?? 'unknown'})`
+      : 'not yet available';
+    return (
+      `Last day of your ClawVitals trial. Your score is ${scoreStr}. ` +
+      `To keep access to fleet view, extended history, and all ${payload.instance_count} instance${payload.instance_count !== 1 ? 's' : ''}, ` +
+      `you'll need Pro at £12/mo. Want me to open the upgrade page, ` +
+      `or would you prefer to move to Free?`
+    );
+  }
 
-  return `\u{2705} Exclusion added for ${excludeMatch[1]}.`;
+  // Fallback for any other days_remaining value
+  return (
+    `Your ClawVitals Pro trial has ${payload.days_remaining} days remaining. ` +
+    `Say 'upgrade ClawVitals' to continue with ${featureList}.`
+  );
 }
 
-/**
- * Rank severity for sorting (lower = more severe).
- *
- * @param severity - The severity level to rank
- * @returns Numeric rank where 0 is most severe (critical) and 4 is least (info)
- */
-function severityRank(severity: Severity): number {
-  const ranks: Record<Severity, number> = {
-    critical: 0,
-    high: 1,
-    medium: 2,
-    low: 3,
-    info: 4,
+// ── Tool helpers ───────────────────────────────────────────────────────────
+
+function textResult(text: string) {
+  return {
+    content: [{ type: 'text' as const, text }],
+    details: null,
   };
-  return ranks[severity];
 }
+
+// ── Tool definitions ───────────────────────────────────────────────────────
+
+const SetAliasSchema = Type.Object({
+  alias: Type.String({
+    description: 'Display name for this installation, e.g. "prod-server-1". Max 64 chars.',
+    minLength: 1,
+    maxLength: 64,
+  }),
+});
+
+const SetScheduleSchema = Type.Object({
+  cron: Type.Optional(Type.String({
+    description: '5-field cron expression, e.g. "0 9 * * *" for 9 AM daily.',
+  })),
+  enabled: Type.Optional(Type.Boolean({
+    description: 'true to enable scheduled scans, false to disable.',
+  })),
+});
+
+const TelemetrySchema = Type.Object({
+  enabled: Type.Boolean({
+    description: 'true to enable telemetry (default), false to opt out.',
+  }),
+});
+
+// ── Plugin ─────────────────────────────────────────────────────────────────
+
+const clawvitalsPlugin = {
+  id: 'clawvitals',
+  name: 'ClawVitals',
+  description: 'Security posture tracking, recurring scans, delta alerts, and fleet dashboard.',
+  configSchema: emptyPluginConfigSchema(),
+
+  register(api: OpenClawPluginApi) {
+    // ── clawvitals_set_alias ─────────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_set_alias',
+      label: 'ClawVitals: Set Alias',
+      description:
+        'Set a human-readable display name for this OpenClaw installation on the ' +
+        'ClawVitals dashboard. Useful for fleet management so installs show as ' +
+        '"prod-server-1" instead of a raw UUID. Max 64 chars.',
+      parameters: SetAliasSchema,
+      execute: async (_id: string, params: Static<typeof SetAliasSchema>) => {
+        const result = validateAlias(params.alias);
+        if (!result.valid) {
+          return textResult(`❌ Invalid alias: ${result.error}`);
+        }
+        const config = loadConfig();
+        config.telemetry = { ...config.telemetry, alias: result.normalized };
+        saveConfig(config);
+        const state = loadState();
+        const display = formatInstallDisplay(state.install_id, result.normalized);
+        return textResult(
+          `✅ Alias set to "${result.normalized}".\n` +
+          `Dashboard display: ${display}\n` +
+          `It will appear on clawvitals.io/dashboard from your next scan.`
+        );
+      },
+    }), { names: ['clawvitals_set_alias'] });
+
+    // ── clawvitals_show_identity ─────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_show_identity',
+      label: 'ClawVitals: Show Identity',
+      description:
+        'Show the ClawVitals install ID and alias for this installation. ' +
+        'The install ID is a random UUID — no PII. Used for fleet management on the dashboard.',
+      parameters: Type.Object({}),
+      execute: async (_id: string, _params: Record<string, never>) => {
+        const state = loadState();
+        const config = loadConfig();
+        const alias = config.telemetry?.alias;
+        const display = formatInstallDisplay(state.install_id, alias);
+        const aliasLine = alias
+          ? `🏷️  Alias:       ${alias}`
+          : `🏷️  Alias:       (not set — use clawvitals_set_alias)`;
+        return textResult(
+          `🆔 ClawVitals Identity\n\n` +
+          `📍 Install ID:  ${state.install_id}\n` +
+          `${aliasLine}\n` +
+          `📊 Dashboard:   ${display}\n` +
+          `📅 Installed:   ${state.installed_at}\n` +
+          `🔢 Total pings: ${state.total_pings}`
+        );
+      },
+    }), { names: ['clawvitals_show_identity'] });
+
+    // ── clawvitals_telemetry ─────────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_telemetry',
+      label: 'ClawVitals: Telemetry',
+      description:
+        'Enable or disable ClawVitals telemetry — anonymous posture data sent to ' +
+        'clawvitals.io/dashboard. Enabled by default because it powers the dashboard. ' +
+        'Disabling stops data appearing on the dashboard.',
+      parameters: TelemetrySchema,
+      execute: async (_id: string, params: Static<typeof TelemetrySchema>) => {
+        const config = loadConfig();
+        config.telemetry = { ...config.telemetry, enabled: params.enabled };
+        saveConfig(config);
+        const status = params.enabled ? 'enabled ✅' : 'disabled ❌';
+        const note = params.enabled
+          ? 'Scan summaries will be sent to clawvitals.io/dashboard from your next scan.'
+          : 'No data will be sent to the dashboard. Local scan history is unaffected.';
+        return textResult(`ClawVitals telemetry ${status}.\n${note}`);
+      },
+    }), { names: ['clawvitals_telemetry'] });
+
+    // ── clawvitals_set_schedule ──────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_set_schedule',
+      label: 'ClawVitals: Set Schedule',
+      description:
+        'Set the cron expression for recurring ClawVitals scans. ' +
+        'Default is daily at 9 AM (0 9 * * *). Pass enabled=false to disable scheduling.',
+      parameters: SetScheduleSchema,
+      execute: async (_id: string, params: Static<typeof SetScheduleSchema>) => {
+        if (params.cron === undefined && params.enabled === undefined) {
+          return textResult('❌ Provide at least one of: cron (expression) or enabled (true/false).');
+        }
+        const config = loadConfig();
+        const schedule = { ...config.schedule };
+        if (params.enabled !== undefined) schedule.enabled = params.enabled;
+        if (params.cron !== undefined) {
+          const err = validateCron(params.cron);
+          if (err) return textResult(`❌ Invalid cron expression: ${err}`);
+          schedule.cron = params.cron;
+        }
+        config.schedule = schedule;
+        saveConfig(config);
+        const isEnabled = schedule.enabled !== false;
+        const cron = schedule.cron ?? DEFAULT_CRON;
+        return textResult(
+          `✅ Schedule updated.\n` +
+          `Status:   ${isEnabled ? 'enabled ✅' : 'disabled ❌'}\n` +
+          `Cron:     ${cron}\n` +
+          `Next run: ${nextCronDescription(cron, isEnabled)}`
+        );
+      },
+    }), { names: ['clawvitals_set_schedule'] });
+
+    // ── clawvitals_status ────────────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_status',
+      label: 'ClawVitals: Status',
+      description:
+        'Show the current ClawVitals plugin status: schedule, telemetry, alias, and install identity.',
+      parameters: Type.Object({}),
+      execute: async (_id: string, _params: Record<string, never>) => {
+        const config = loadConfig();
+        const state = loadState();
+        const telemetryEnabled = config.telemetry?.enabled !== false;
+        const scheduleEnabled = config.schedule?.enabled !== false;
+        const cron = config.schedule?.cron ?? DEFAULT_CRON;
+        const alias = config.telemetry?.alias;
+        return textResult(
+          `📊 ClawVitals Plugin Status\n\n` +
+          `🗓️  Schedule:    ${scheduleEnabled ? `enabled ✅  (${cron})` : 'disabled ❌'}\n` +
+          `⏭️  Next run:    ${nextCronDescription(cron, scheduleEnabled)}\n` +
+          `📡 Telemetry:   ${telemetryEnabled ? 'enabled ✅' : 'disabled ❌'}\n` +
+          `🏷️  Alias:       ${alias ?? '(not set)'}\n` +
+          `🆔 Install ID:  ${state.install_id}\n` +
+          `🔢 Total pings: ${state.total_pings}`
+        );
+      },
+    }), { names: ['clawvitals_status'] });
+
+    // ── clawvitals_trial_status ──────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_trial_status',
+      label: 'ClawVitals: Trial Status',
+      description:
+        'Check your ClawVitals Pro trial status — days remaining, features at risk, ' +
+        'and how to upgrade. Returns a conversational summary.',
+      parameters: Type.Object({}),
+      execute: async (_id: string, _params: Record<string, never>) => {
+        try {
+          const response = await agentGet('/agent/status');
+          if (!response.ok) {
+            return textResult(
+              '❌ Could not fetch trial status. Make sure ClawVitals is linked to your account.'
+            );
+          }
+
+          const data = await response.json() as {
+            trial?: TrialStatus | null;
+          };
+
+          const trial = data.trial;
+          if (!trial) {
+            return textResult(
+              "ClawVitals isn't linked to an account yet. " +
+              "Run 'clawvitals register' to get started."
+            );
+          }
+
+          if (trial.plan === 'pro') {
+            return textResult("✅ You're on ClawVitals Pro — full access active.");
+          }
+
+          if (trial.plan === 'free') {
+            return textResult(
+              "You're on the ClawVitals Free plan. You have 1 instance and 7-day history.\n" +
+              `To upgrade to Pro (fleet view, PDF reports, 90-day history), say 'upgrade ClawVitals'.\n` +
+              `Upgrade URL: ${trial.upgrade_url}`
+            );
+          }
+
+          // trial plan
+          const daysLeft = trial.days_remaining ?? 0;
+          const endsDate = trial.ends_at
+            ? new Date(trial.ends_at).toLocaleDateString('en-GB', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              })
+            : 'soon';
+
+          const featuresUsing = ['fleet view', 'PDF reports', '90-day history'];
+
+          if (daysLeft <= 0) {
+            return textResult(
+              "Your ClawVitals Pro trial has ended. You're now on the Free plan.\n" +
+              `To restore fleet access and full history, say 'upgrade ClawVitals'.\n` +
+              `Upgrade URL: ${trial.upgrade_url}`
+            );
+          }
+
+          return textResult(
+            `⏳ Your ClawVitals Pro trial has ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left (ends ${endsDate}).\n` +
+            `You're currently using: ${featuresUsing.join(', ')}.\n` +
+            `To keep these after your trial, say 'upgrade ClawVitals'.`
+          );
+
+        } catch (err) {
+          return textResult(`❌ Error fetching trial status: ${(err as Error).message}`);
+        }
+      },
+    }), { names: ['clawvitals_trial_status'] });
+
+    // ── clawvitals_upgrade ───────────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_upgrade',
+      label: 'ClawVitals: Upgrade to Pro',
+      description:
+        'Initiate the ClawVitals Pro upgrade flow. Returns a Stripe checkout link. ' +
+        'Use when the user says they want to upgrade or subscribe.',
+      parameters: Type.Object({}),
+      execute: async (_id: string, _params: Record<string, never>) => {
+        try {
+          const response = await agentPost('/agent/upgrade');
+          if (!response.ok) {
+            const err = await response.json() as { error?: string };
+            return textResult(
+              `❌ Could not initiate upgrade: ${err.error ?? response.statusText}. ` +
+              `Make sure ClawVitals is linked to your account first.`
+            );
+          }
+
+          const data = await response.json() as {
+            ok: boolean;
+            checkout_url: string;
+            message: string;
+          };
+
+          return textResult(
+            `Here's your upgrade link: ${data.checkout_url}\n` +
+            `Opens Stripe checkout — takes about 2 minutes.`
+          );
+
+        } catch (err) {
+          return textResult(`❌ Error initiating upgrade: ${(err as Error).message}`);
+        }
+      },
+    }), { names: ['clawvitals_upgrade'] });
+
+    // ── clawvitals_configure_webhook ─────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_configure_webhook',
+      label: 'ClawVitals: Configure Notification Webhook',
+      description:
+        'Set the webhook URL for ClawVitals to send trial reminders and alerts to your agent. ' +
+        'The webhook secret is returned once and stored securely.',
+      parameters: Type.Object({
+        webhook_url: Type.String({
+          description: 'The HTTPS URL to receive ClawVitals webhooks.',
+        }),
+      }),
+      execute: async (_id: string, params: { webhook_url: string }) => {
+        if (!params.webhook_url.startsWith('https://')) {
+          return textResult('❌ Webhook URL must use https://');
+        }
+
+        try {
+          const response = await agentPost('/agent/webhook/configure', {
+            webhook_url: params.webhook_url,
+          });
+
+          if (!response.ok) {
+            const err = await response.json() as { error?: string };
+            return textResult(`❌ Could not configure webhook: ${err.error ?? response.statusText}`);
+          }
+
+          const data = await response.json() as {
+            ok: boolean;
+            webhook_url: string;
+            webhook_secret: string;
+          };
+
+          // Store webhook secret securely in state (mode 0600)
+          const state = loadState();
+          state.webhook_secret = data.webhook_secret;
+          saveState(state);
+
+          return textResult(
+            `✅ Webhook configured: ${data.webhook_url}\n\n` +
+            `🔐 Webhook secret (shown once — saved to state.json):\n${data.webhook_secret}\n\n` +
+            `Use the X-ClawVitals-Signature header to verify incoming webhooks.`
+          );
+
+        } catch (err) {
+          return textResult(`❌ Error configuring webhook: ${(err as Error).message}`);
+        }
+      },
+    }), { names: ['clawvitals_configure_webhook'] });
+  },
+};
+
+export default clawvitalsPlugin;

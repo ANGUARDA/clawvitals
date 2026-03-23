@@ -1,0 +1,89 @@
+{
+  "id": "clawvitals",
+  "name": "ClawVitals",
+  "description": "Security posture tracking, recurring scans, delta alerts, and fleet dashboard for OpenClaw installations.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "telemetry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Send anonymous scan summaries to telemetry.clawvitals.io. Enabled by default — this powers the dashboard. Disable with clawvitals telemetry off.",
+            "default": true
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Telemetry endpoint URL.",
+            "default": "https://telemetry.clawvitals.io/ping"
+          },
+          "alias": {
+            "type": "string",
+            "description": "Human-readable name for this installation on the clawvitals.io/dashboard. Used instead of the raw install UUID. Useful for fleet management (e.g. 'prod-server-1', 'dev-laptop'). Max 64 chars.",
+            "maxLength": 64
+          }
+        }
+      },
+      "schedule": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable recurring scans.",
+            "default": true
+          },
+          "cron": {
+            "type": "string",
+            "description": "Cron expression for recurring scans.",
+            "default": "0 9 * * *"
+          }
+        }
+      },
+      "alerts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "on_regression": {
+            "type": "boolean",
+            "description": "Alert when score drops or a new FAIL is detected since last scan.",
+            "default": true
+          },
+          "on_new_critical": {
+            "type": "boolean",
+            "description": "Alert immediately when a critical-severity finding appears.",
+            "default": true
+          },
+          "threshold": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low", "info"],
+            "description": "Minimum severity level to trigger alerts.",
+            "default": "high"
+          }
+        }
+      },
+      "retention_days": {
+        "type": "integer",
+        "description": "Number of days to retain local scan history.",
+        "default": 90,
+        "minimum": 7,
+        "maximum": 365
+      }
+    }
+  },
+  "uiHints": {
+    "telemetry.alias": {
+      "label": "Installation alias",
+      "placeholder": "e.g. prod-server-1",
+      "hint": "Shown on clawvitals.io/dashboard instead of the raw install ID"
+    },
+    "telemetry.enabled": {
+      "label": "Telemetry",
+      "hint": "Powers the dashboard. Anonymous scan summaries only — no config, credentials, or finding details."
+    }
+  }
+}
