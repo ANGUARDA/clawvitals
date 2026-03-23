@@ -62,6 +62,13 @@ export * from './scheduler.js';
 export * from './alerts.js';
 export * from './alias.js';
 
+// ── Workspace resolution ───────────────────────────────────────────────────
+
+/** Resolve the OpenClaw workspace root (where clawvitals/ sub-dir lives). */
+function resolveWorkspaceDir(): string {
+  return path.join(os.homedir(), '.openclaw', 'workspace');
+}
+
 // ── State file (persisted to plugin data dir) ──────────────────────────────
 
 const PLUGIN_DIR = path.join(os.homedir(), '.openclaw', 'plugins', 'clawvitals');
@@ -744,6 +751,84 @@ const clawvitalsPlugin = {
       },
     }), { names: ['clawvitals_configure_webhook'] });
 
+    // ── clawvitals_exclude ───────────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_exclude',
+      label: 'ClawVitals: Add Exclusion',
+      description:
+        'Suppress a specific ClawVitals control from being flagged. ' +
+        'Use when a finding is intentional or not applicable to your setup. ' +
+        'Exclusions are stored in exclusions.json and shown in scan reports. ' +
+        'Optional: set an expiry date (ISO 8601) after which the exclusion is automatically lifted.',
+      parameters: Type.Object({
+        control_id: Type.String({
+          description: 'Control ID to exclude, e.g. "NC-OC-005"',
+          pattern: '^NC-[A-Z]+-\\d+$',
+        }),
+        reason: Type.String({
+          description: 'Why this control is being excluded.',
+          minLength: 5,
+          maxLength: 200,
+        }),
+        expires: Type.Optional(Type.String({
+          description: 'ISO 8601 expiry date, e.g. "2026-06-01". Omit for no expiry.',
+        })),
+      }),
+      execute: async (_id: string, params: { control_id: string; reason: string; expires?: string }) => {
+        const workspaceDir = resolveWorkspaceDir();
+        const config = new ConfigManager(workspaceDir);
+        const exclusion = {
+          controlId: params.control_id.toUpperCase(),
+          reason: params.reason,
+          created_at: new Date().toISOString(),
+          created_by: 'plugin',
+          ...(params.expires ? { expires: params.expires } : {}),
+        };
+        config.addExclusion(exclusion);
+        const expiryStr = params.expires
+          ? `Expires: ${params.expires}`
+          : 'No expiry (permanent until removed)';
+        return textResult(
+          `✅ Exclusion added for ${exclusion.controlId}.\n` +
+          `Reason: ${exclusion.reason}\n` +
+          `${expiryStr}\n\n` +
+          `This control will show as EXCLUDED in future scans. ` +
+          `Run 'clawvitals exclusions' to view all active exclusions.`
+        );
+      },
+    }), { names: ['clawvitals_exclude'] });
+
+    // ── clawvitals_exclusions ────────────────────────────────────────────
+    api.registerTool(() => ({
+      name: 'clawvitals_exclusions',
+      label: 'ClawVitals: List Exclusions',
+      description:
+        'List all active ClawVitals exclusions. Shows control ID, reason, creation date, ' +
+        'and expiry. Expired exclusions are shown separately.',
+      parameters: Type.Object({}),
+      execute: async (_id: string, _params: Record<string, never>) => {
+        const workspaceDir = resolveWorkspaceDir();
+        const config = new ConfigManager(workspaceDir);
+        const all = config.getExclusions();
+        if (all.length === 0) {
+          return textResult('No exclusions configured. All controls are evaluated normally.');
+        }
+        const now = new Date();
+        const active = all.filter(ex => !ex.expires || new Date(ex.expires) > now);
+        const expired = all.filter(ex => ex.expires && new Date(ex.expires) <= now);
+        const formatExclusion = (ex: { controlId: string; reason: string; created_at: string; expires?: string }) => {
+          const expiry = ex.expires ? `expires ${ex.expires}` : 'permanent';
+          return `• ${ex.controlId} — ${ex.reason} (${expiry}, added ${ex.created_at.slice(0, 10)})`;
+        };
+        let out = `📋 ClawVitals Exclusions\n\n`;
+        out += `Active (${active.length}):\n${active.map(formatExclusion).join('\n') || '  none'}`;
+        if (expired.length > 0) {
+          out += `\n\nExpired (${expired.length}) — no longer suppressing:\n${expired.map(formatExclusion).join('\n')}`;
+        }
+        return textResult(out);
+      },
+    }), { names: ['clawvitals_exclusions'] });
+
     // ── Scan intent + cron hook ───────────────────────────────────────────
     //
     // This hook intercepts two distinct trigger types:
@@ -757,7 +842,7 @@ const clawvitalsPlugin = {
     //    — scheduled scan, silent unless regression/critical found.
     api.on('before_agent_start', async (_event, ctx) => {
       const prompt = _event.prompt ?? '';
-      const workspaceDir = ctx.workspaceDir ?? (api.config as { workspace?: { path?: string } })?.workspace?.path ?? os.homedir();
+      const workspaceDir = ctx.workspaceDir ?? resolveWorkspaceDir();
 
       // ── Cron: scheduled scan ───────────────────────────────────────────
       if (ctx.trigger === 'cron' && prompt.includes(CRON_JOB_NAME)) {

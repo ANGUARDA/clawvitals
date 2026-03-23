@@ -10,10 +10,13 @@ The **plugin** is the upgrade path. It adds everything the skill deliberately om
 
 | Feature | Skill | Plugin |
 |---|---|---|
-| Point-in-time scans | ✅ | ✅ |
-| Scan history & delta | ❌ | ✅ |
+| Scan & score | ✅ | ✅ |
+| Remediation steps | ✅ | ✅ |
+| Experimental controls | ✅ | ✅ |
+| Scan history & delta detection | ❌ | ✅ |
 | Recurring scheduled scans | ❌ | ✅ |
 | Regression + critical alerts | ❌ | ✅ |
+| Exclusion management | ❌ | ✅ _(add/list — see below)_ |
 | Posture trend on dashboard | ❌ | ✅ |
 | Fleet management (alias) | ❌ | ✅ |
 | Telemetry | none | **on by default (opt-out)** |
@@ -89,14 +92,32 @@ dev-laptop      (iid: 7c1b...)   70/100  🟡  last scan: 1d ago
 ## Agent commands
 
 ```
-set clawvitals alias <name>    — set fleet display name for this installation
-show clawvitals identity       — show install ID, alias, and dashboard link
-clawvitals telemetry on|off    — enable or disable telemetry
-clawvitals schedule            — show/set recurring scan schedule
-clawvitals status              — current plugin config and state
-clawvitals trial               — check Pro trial status
-upgrade clawvitals             — initiate Pro upgrade (Stripe checkout)
+run clawvitals                              — run a scan (plugin pipeline, not skill)
+show clawvitals details                     — full report with remediation steps
+set clawvitals alias <name>                 — set fleet display name for this installation
+show clawvitals identity                    — show install ID, alias, and dashboard link
+clawvitals telemetry on|off                 — enable or disable telemetry
+clawvitals schedule                         — show/set recurring scan schedule
+clawvitals status                           — current plugin config and state
+clawvitals exclude <NC-ID> <reason>         — suppress a control finding
+clawvitals exclusions                       — list all active exclusions
+clawvitals trial                            — check Pro trial status
+upgrade clawvitals                          — initiate Pro upgrade (Stripe checkout)
 ```
+
+## Exclusion management
+
+Suppress findings that are intentional or not applicable to your setup:
+
+```
+clawvitals exclude NC-OC-005 reason "personal assistant setup"
+clawvitals exclude NC-AUTH-001 reason "no reverse proxy, local-only" expires 2026-09-01
+clawvitals exclusions
+```
+
+Exclusions are stored in `~/.openclaw/workspace/clawvitals/exclusions.json` (mode 600).
+They show as `EXCLUDED` in scan reports — never silently hidden. Expired exclusions are
+automatically inactivated on the next scan.
 
 ## Directory structure
 
