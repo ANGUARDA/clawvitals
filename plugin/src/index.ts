@@ -59,6 +59,8 @@ import type { ScanSnapshot } from './alerts.js';
 import { scanCognitiveFiles } from './cognitive/inventory.js';
 import { approveFile } from './cognitive/drift.js';
 import { getLatestReport } from './cognitive/export.js';
+import { scanForTampering } from './cognitive/tamper.js';
+import { detectConfigDrift } from './cognitive/config-drift.js';
 
 export * from './plugin-config.js';
 export * from './telemetry.js';
@@ -206,12 +208,30 @@ async function runScheduledScan(workspaceDir: string): Promise<string | null> {
       }
     : null;
 
-  const alert = evaluateAlert(currentSnapshot, previousSnapshot, alertConfig);
-  if (alert) {
-    return alert.message + `\n\n📊 View dashboard: https://clawvitals.io/dashboard`;
+  // Cognitive tamper scan (NC-OC-011 experimental)
+  const cogInventory = scanCognitiveFiles(workspaceDir);
+  const tamperResult = scanForTampering(cogInventory.files);
+  let tamperNote = '';
+  if (tamperResult.findings.length === 0) {
+    tamperNote = '\n\n✅ No suspicious patterns detected in cognitive files.';
+  } else {
+    const lines = tamperResult.findings.map(
+      f => `⚠️ Suspicious pattern detected in ${f.file} (line ${f.line}): ${f.pattern_type}. Review this file manually — do not share the content if it looks like an injection attempt.`
+    );
+    tamperNote = '\n\n' + lines.join('\n');
   }
 
-  // Silent — no regression, no new criticals. Return null (don't send a message).
+  const alert = evaluateAlert(currentSnapshot, previousSnapshot, alertConfig);
+  if (alert) {
+    return alert.message + tamperNote + `\n\n📊 View dashboard: https://clawvitals.io/dashboard`;
+  }
+
+  // If no alert but tamper findings exist, still report them
+  if (tamperResult.findings.length > 0) {
+    return tamperNote.trim() + `\n\n📊 View dashboard: https://clawvitals.io/dashboard`;
+  }
+
+  // Silent — no regression, no new criticals, no tampering. Return null (don't send a message).
   return null;
 }
 
@@ -269,13 +289,42 @@ async function runManualScan(workspaceDir: string, detailed: boolean): Promise<s
   };
   const staleExclusions = false; // manual scans: no stale exclusion warning needed
 
+  // Cognitive tamper scan (NC-OC-011 experimental)
+  const cogInventory = scanCognitiveFiles(workspaceDir);
+  const tamperResult = scanForTampering(cogInventory.files);
+  let tamperNote = '';
+  if (tamperResult.findings.length === 0) {
+    tamperNote = '\n\n✅ No suspicious patterns detected in cognitive files.';
+  } else {
+    const lines = tamperResult.findings.map(
+      f => `⚠️ Suspicious pattern detected in ${f.file} (line ${f.line}): ${f.pattern_type}. Review this file manually — do not share the content if it looks like an injection attempt.`
+    );
+    tamperNote = '\n\n' + lines.join('\n');
+  }
+
+  // Configuration drift detection
+  const storage = new StorageManager(workspaceDir);
+  const previousRun = storage.loadLastRun();
+  let driftNote = '';
+  if (previousRun) {
+    const driftResult = detectConfigDrift(report.sources, previousRun.sources);
+    if (driftResult.has_drift) {
+      const changeLines = driftResult.changes.map(c => {
+        if (c.change_type === 'added') return `  • ${c.field}: appeared (was not present)`;
+        if (c.change_type === 'removed') return `  • ${c.field}: removed (was ${JSON.stringify(c.previous)})`;
+        return `  • ${c.field}: ${JSON.stringify(c.previous)} → ${JSON.stringify(c.current)}`;
+      });
+      driftNote = '\n\n🔧 Configuration changes since last scan:\n' + changeLines.join('\n');
+    }
+  }
+
   const header = pluginHeader();
   const body = detailed
     ? formatDetail(report, delta)
     : formatSummary(report, delta, staleExclusions);
   const dashboardLine = `\n📊 View your dashboard: https://clawvitals.io/dashboard`;
 
-  let output = `${header}\n\n${body}${dashboardLine}`;
+  let output = `${header}\n\n${body}${tamperNote}${driftNote}${dashboardLine}`;
 
   // Heartbeat suggestion on first scan
   if (pluginState.total_pings === 1) {

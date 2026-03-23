@@ -361,6 +361,27 @@
         "https://clawvitals.io/docs/NC-VERS-005"
       ],
       "false_positive_notes": "Uncertain data source \u2014 may not produce results on current OpenClaw versions."
+    },
+    {
+      "id": "NC-OC-011",
+      "name": "No suspicious patterns in cognitive files",
+      "domain": "OC",
+      "severity": "medium",
+      "mode": 2,
+      "status": "experimental",
+      "introduced_in": "1.1.0",
+      "description": "Scans cognitive files for zero-width characters, instruction-override phrases, and external script URLs.",
+      "why_it_matters": "Cognitive files define agent behaviour. Injected instructions or zero-width characters can silently alter agent actions.",
+      "check": {
+        "source": "filesystem",
+        "source_type": "contextual",
+        "prerequisite": "NC-OC-010 must have run first (cognitive files must be inventoried)",
+        "condition": "No suspicious patterns found in any cognitive file"
+      },
+      "evidence_template": "{n} suspicious pattern(s) found across {files} file(s)",
+      "remediation": "Review the flagged file and line number manually. If the content is legitimate, it may be a false positive \u2014 use clawvitals exclude NC-OC-011 to suppress. If unexpected, investigate immediately.",
+      "references": ["https://clawvitals.io/docs/nc-oc-011"],
+      "false_positive_notes": "High FP risk for instruction_override patterns \u2014 these phrases legitimately appear in security documentation. Always review manually before acting."
     }
   ]
 }
