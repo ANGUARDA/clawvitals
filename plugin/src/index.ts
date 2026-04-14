@@ -223,7 +223,7 @@ async function runScheduledScan(workspaceDir: string): Promise<string | null> {
     tamperNote = '\n\n✅ No suspicious patterns detected in cognitive files.';
   } else {
     const lines = tamperResult.findings.map(
-      f => `⚠️ Suspicious pattern detected in ${f.file} (line ${f.line}): ${f.pattern_type}. Review this file manually — do not share the content if it looks like an injection attempt.`
+      f => `⚠️ Suspicious pattern detected: ${f.pattern_type}. Review your cognitive files manually — do not share the content if it looks like an injection attempt.`
     );
     tamperNote = '\n\n' + lines.join('\n');
   }
@@ -304,7 +304,7 @@ async function runManualScan(workspaceDir: string, detailed: boolean): Promise<s
     tamperNote = '\n\n✅ No suspicious patterns detected in cognitive files.';
   } else {
     const lines = tamperResult.findings.map(
-      f => `⚠️ Suspicious pattern detected in ${f.file} (line ${f.line}): ${f.pattern_type}. Review this file manually — do not share the content if it looks like an injection attempt.`
+      f => `⚠️ Suspicious pattern detected: ${f.pattern_type}. Review your cognitive files manually — do not share the content if it looks like an injection attempt.`
     );
     tamperNote = '\n\n' + lines.join('\n');
   }

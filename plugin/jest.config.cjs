@@ -16,6 +16,7 @@ const sdkPath = (() => {
 // The real SDK is used at runtime inside OpenClaw's process.
 const moduleNameMapper = {
   '^@openclaw/plugin-sdk$': '<rootDir>/tests/__mocks__/openclaw-plugin-sdk.cjs',
+  '^uuid$': '<rootDir>/tests/__mocks__/uuid.cjs',
 };
 
 module.exports = {
