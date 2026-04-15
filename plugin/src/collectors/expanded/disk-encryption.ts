@@ -1,11 +1,16 @@
 /**
  * disk-encryption.ts — Checks whether full disk encryption is enabled.
+ *
+ * macOS: runs `fdesetup status` and checks for "FileVault is On".
+ * Linux: runs `lsblk -f` and checks for `crypto_LUKS`.
+ * Unknown platforms return platform='unknown' so the evaluator can SKIP.
  */
 
 import { execSync } from 'node:child_process';
 import * as os from 'node:os';
 import type { DiskEncryptionResult } from '../../types';
 
+/** Check macOS FileVault status. */
 function checkMacOS(): DiskEncryptionResult {
   try {
     const output = execSync('fdesetup status', { encoding: 'utf8', timeout: 5000 });
@@ -16,6 +21,7 @@ function checkMacOS(): DiskEncryptionResult {
   }
 }
 
+/** Check Linux LUKS encryption via lsblk. */
 function checkLinux(): DiskEncryptionResult {
   try {
     const output = execSync('lsblk -f', { encoding: 'utf8', timeout: 5000 });
@@ -26,6 +32,10 @@ function checkLinux(): DiskEncryptionResult {
   }
 }
 
+/**
+ * Check whether full disk encryption is enabled.
+ * Returns platform='unknown' for unsupported platforms (evaluator will SKIP).
+ */
 export function collectDiskEncryption(): DiskEncryptionResult {
   try {
     const platform = os.platform();

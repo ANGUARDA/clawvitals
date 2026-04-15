@@ -1,5 +1,10 @@
 /**
  * cloudflare-tunnel.ts — Reads ~/.cloudflared/config.yml to check for unauthenticated ingress.
+ *
+ * Uses simple line-based parsing (not a YAML library) to find hostname entries
+ * that lack a nearby `access_required: true` directive. If the config file is
+ * absent, returns tunnel_found=false (SKIP). Malformed content is handled
+ * gracefully — the parser simply won't match any hostnames.
  */
 
 import * as fs from 'node:fs';
@@ -7,6 +12,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { CloudflareTunnelResult } from '../../types';
 
+/**
+ * Check ~/.cloudflared/config.yml for ingress rules that lack authentication.
+ * Returns tunnel_found=false if the config file does not exist (SKIP).
+ */
 export function collectCloudflareTunnel(): CloudflareTunnelResult {
   try {
     const configPath = path.join(os.homedir(), '.cloudflared', 'config.yml');

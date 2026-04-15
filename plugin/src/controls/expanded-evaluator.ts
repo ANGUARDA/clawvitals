@@ -170,6 +170,9 @@ export class ExpandedEvaluator {
     if (!r.os_updates.ok) {
       return { ...def, result: 'ERROR', evidence: `Collector error: ${r.os_updates.error}`, remediation: def.remediation };
     }
+    if (r.os_updates.platform === 'unknown') {
+      return { ...def, result: 'SKIP', evidence: 'Unsupported platform — cannot determine auto-update status', remediation: def.remediation };
+    }
     if (!r.os_updates.auto_updates_enabled) {
       return { ...def, result: 'FAIL', evidence: `Automatic updates not enabled (${r.os_updates.platform})`, remediation: def.remediation };
     }
@@ -180,6 +183,9 @@ export class ExpandedEvaluator {
     const def = CONTROLS['NC-OS-002'];
     if (!r.disk_encryption.ok) {
       return { ...def, result: 'ERROR', evidence: `Collector error: ${r.disk_encryption.error}`, remediation: def.remediation };
+    }
+    if (r.disk_encryption.platform === 'unknown') {
+      return { ...def, result: 'SKIP', evidence: 'Unsupported platform — cannot determine disk encryption status', remediation: def.remediation };
     }
     if (!r.disk_encryption.encrypted) {
       return { ...def, result: 'FAIL', evidence: `Disk encryption not enabled (${r.disk_encryption.platform})`, remediation: def.remediation };

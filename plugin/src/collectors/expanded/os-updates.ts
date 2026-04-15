@@ -1,5 +1,9 @@
 /**
  * os-updates.ts — Checks whether automatic OS updates are enabled.
+ *
+ * macOS: runs `softwareupdate -l` and checks for "No new software available".
+ * Linux: reads /etc/apt/apt.conf.d/20auto-upgrades for Unattended-Upgrade "1".
+ * Unknown platforms return platform='unknown' so the evaluator can SKIP.
  */
 
 import { execSync } from 'node:child_process';
@@ -7,6 +11,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import type { OsUpdatesResult } from '../../types';
 
+/** Check macOS auto-update status via softwareupdate. */
 function checkMacOS(): OsUpdatesResult {
   try {
     const output = execSync('softwareupdate -l 2>&1', { encoding: 'utf8', timeout: 30000 });
@@ -19,6 +24,7 @@ function checkMacOS(): OsUpdatesResult {
   }
 }
 
+/** Check Linux unattended-upgrades configuration. */
 function checkLinux(): OsUpdatesResult {
   try {
     const configPath = '/etc/apt/apt.conf.d/20auto-upgrades';
@@ -33,6 +39,10 @@ function checkLinux(): OsUpdatesResult {
   }
 }
 
+/**
+ * Check whether automatic OS updates are enabled.
+ * Returns platform='unknown' for unsupported platforms (evaluator will SKIP).
+ */
 export function collectOsUpdates(): OsUpdatesResult {
   try {
     const platform = os.platform();

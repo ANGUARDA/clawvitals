@@ -1,5 +1,9 @@
 /**
  * network.ts — Scans for management ports exposed beyond localhost.
+ *
+ * Checks ports 22, 2375, 2376, 8080, and 9000. Uses `lsof` first,
+ * falling back to `ss` on Linux. Only flags ports bound to 0.0.0.0/[::]/*
+ * as exposed — localhost-only bindings are not reported.
  */
 
 import { execSync } from 'node:child_process';
@@ -13,6 +17,7 @@ const MANAGEMENT_PORTS: Array<{ port: number; service: string }> = [
   { port: 9000, service: 'Management Console' },
 ];
 
+/** Attempt to detect a port's bind address via lsof. Returns null if lsof is unavailable. */
 function tryLsof(port: number): { bound: boolean; bind: string } | null {
   try {
     const output = execSync(`lsof -i :${port} -sTCP:LISTEN`, { encoding: 'utf8', timeout: 5000 });
@@ -30,6 +35,7 @@ function tryLsof(port: number): { bound: boolean; bind: string } | null {
   }
 }
 
+/** Attempt to detect a port's bind address via ss (Linux fallback). Returns null if ss is unavailable. */
 function trySs(port: number): { bound: boolean; bind: string } | null {
   try {
     const output = execSync(`ss -tlnp sport = :${port}`, { encoding: 'utf8', timeout: 5000 });
@@ -48,6 +54,10 @@ function trySs(port: number): { bound: boolean; bind: string } | null {
   }
 }
 
+/**
+ * Scan management ports for external exposure.
+ * Returns a list of ports bound to wildcard addresses (0.0.0.0/[::]).
+ */
 export function collectNetwork(): NetworkResult {
   try {
     const exposed: ExposedPort[] = [];

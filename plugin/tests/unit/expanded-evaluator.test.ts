@@ -249,6 +249,14 @@ describe('ExpandedEvaluator', () => {
       const e = evals.find(e => e.control_id === 'NC-OS-001')!;
       expect(e.result).toBe('FAIL');
     });
+
+    it('SKIP when platform is unknown', () => {
+      const r = makeBaseResult();
+      r.os_updates = { ok: true, platform: 'unknown', auto_updates_enabled: false, error: null };
+      const evals = evaluator.evaluate(r);
+      const e = evals.find(e => e.control_id === 'NC-OS-001')!;
+      expect(e.result).toBe('SKIP');
+    });
   });
 
   // ── NC-OS-002 ──────────────────────────────────────────────────
@@ -267,6 +275,14 @@ describe('ExpandedEvaluator', () => {
       const evals = evaluator.evaluate(r);
       const e = evals.find(e => e.control_id === 'NC-OS-002')!;
       expect(e.result).toBe('FAIL');
+    });
+
+    it('SKIP when platform is unknown', () => {
+      const r = makeBaseResult();
+      r.disk_encryption = { ok: true, platform: 'unknown', encrypted: false, error: null };
+      const evals = evaluator.evaluate(r);
+      const e = evals.find(e => e.control_id === 'NC-OS-002')!;
+      expect(e.result).toBe('SKIP');
     });
   });
 

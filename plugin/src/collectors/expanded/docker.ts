@@ -1,5 +1,9 @@
 /**
  * docker.ts — Inspects running Docker containers for privilege escalation risks.
+ *
+ * Checks for: privileged mode, root user, and dangerous Linux capabilities
+ * (SYS_ADMIN, NET_ADMIN, ALL). Caps at {@link MAX_CONTAINERS} containers to
+ * bound execution time. Docker not being installed results in a graceful SKIP.
  */
 
 import { execSync } from 'node:child_process';
@@ -8,6 +12,14 @@ import type { DockerResult, DockerContainer } from '../../types';
 const MAX_CONTAINERS = 20;
 const DANGEROUS_CAPS = ['SYS_ADMIN', 'NET_ADMIN', 'ALL'];
 
+/** Validates that a string looks like a Docker container short/long ID (hex only). */
+const CONTAINER_ID_RE = /^[0-9a-f]+$/i;
+
+/**
+ * Collect Docker container security posture.
+ * Returns details on privileged, root-user, and dangerous-cap containers.
+ * Returns docker_available=false when Docker is not installed or not running.
+ */
 export function collectDocker(): DockerResult {
   try {
     let ids: string;
@@ -18,7 +30,11 @@ export function collectDocker(): DockerResult {
       return { ok: true, docker_available: false, containers: [], error: null };
     }
 
-    const containerIds = ids.split('\n').filter(l => l.trim().length > 0).slice(0, MAX_CONTAINERS);
+    const containerIds = ids
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0 && CONTAINER_ID_RE.test(l))
+      .slice(0, MAX_CONTAINERS);
     if (containerIds.length === 0) {
       return { ok: true, docker_available: true, containers: [], error: null };
     }

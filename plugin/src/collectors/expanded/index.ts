@@ -14,6 +14,7 @@ import { collectDocker } from './docker';
 import { collectOsUpdates } from './os-updates';
 import { collectDiskEncryption } from './disk-encryption';
 
+/** Build a fallback result when a collector's Promise rejects unexpectedly. */
 function errorResult<T>(reason: unknown, defaults: T): T {
   const error = reason instanceof Error ? reason.message : 'Unknown error';
   return { ...defaults, ok: false, error };

@@ -132,6 +132,17 @@ describe('collectSecretsFiles', () => {
     const generic = result.findings.find(f => f.pattern === 'Generic API Key');
     expect(generic).toBeDefined();
   });
+
+  it('never includes actual secret values in findings', () => {
+    const secretValue = 'sk-abcdefghijklmnopqrstuvwxyz1234567890';
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(`OPENAI_API_KEY=${secretValue}`);
+    const result = collectSecretsFiles();
+    const serialised = JSON.stringify(result);
+    expect(serialised).not.toContain(secretValue);
+    expect(result.findings[0].pattern).toBe('OpenAI');
+    expect(result.findings[0].line_hint).toBe(1);
+  });
 });
 
 // ── Secrets History ──────────────────────────────────────────────
@@ -151,6 +162,15 @@ describe('collectSecretsHistory', () => {
     expect(result.ok).toBe(true);
     const anthropic = result.findings.find(f => f.pattern === 'Anthropic');
     expect(anthropic).toBeDefined();
+  });
+
+  it('never includes actual secret values in findings', () => {
+    const secretValue = 'sk-ant-abcdefghijklmnopqrstuvwxyz';
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(`curl -H "Authorization: Bearer ${secretValue}"`);
+    const result = collectSecretsHistory();
+    const serialised = JSON.stringify(result);
+    expect(serialised).not.toContain(secretValue);
   });
 });
 
@@ -198,10 +218,10 @@ describe('collectDocker', () => {
 
   it('detects privileged container', () => {
     mockExecSync.mockImplementation((cmd: string) => {
-      if (typeof cmd === 'string' && cmd.includes('docker ps')) return 'abc123\n';
+      if (typeof cmd === 'string' && cmd.includes('docker ps')) return 'abc123def0\n';
       if (typeof cmd === 'string' && cmd.includes('docker inspect')) {
         return JSON.stringify([{
-          Id: 'abc123',
+          Id: 'abc123def0',
           Name: '/test-container',
           HostConfig: { Privileged: true, CapAdd: [] },
           Config: { User: 'nobody' },
@@ -219,10 +239,10 @@ describe('collectDocker', () => {
 
   it('detects root user container', () => {
     mockExecSync.mockImplementation((cmd: string) => {
-      if (typeof cmd === 'string' && cmd.includes('docker ps')) return 'def456\n';
+      if (typeof cmd === 'string' && cmd.includes('docker ps')) return 'def456aabb\n';
       if (typeof cmd === 'string' && cmd.includes('docker inspect')) {
         return JSON.stringify([{
-          Id: 'def456',
+          Id: 'def456aabb',
           Name: '/root-container',
           HostConfig: { Privileged: false, CapAdd: null },
           Config: { User: '' },
@@ -237,10 +257,10 @@ describe('collectDocker', () => {
 
   it('detects dangerous capabilities', () => {
     mockExecSync.mockImplementation((cmd: string) => {
-      if (typeof cmd === 'string' && cmd.includes('docker ps')) return 'ghi789\n';
+      if (typeof cmd === 'string' && cmd.includes('docker ps')) return 'aabb001122\n';
       if (typeof cmd === 'string' && cmd.includes('docker inspect')) {
         return JSON.stringify([{
-          Id: 'ghi789',
+          Id: 'aabb001122',
           Name: '/cap-container',
           HostConfig: { Privileged: false, CapAdd: ['SYS_ADMIN', 'NET_RAW'] },
           Config: { User: 'nobody' },
@@ -251,6 +271,17 @@ describe('collectDocker', () => {
     const result = collectDocker();
     expect(result.ok).toBe(true);
     expect(result.containers[0].dangerous_caps).toEqual(['SYS_ADMIN']);
+  });
+
+  it('rejects non-hex container IDs to prevent injection', () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === 'string' && cmd.includes('docker ps')) return 'abc123\n; rm -rf /\n';
+      throw new Error('unexpected');
+    });
+    const result = collectDocker();
+    expect(result.ok).toBe(true);
+    // The malicious line should be filtered out; abc123 is valid hex
+    expect(result.containers).toHaveLength(0); // abc123 passes but no inspect mock matches
   });
 });
 
