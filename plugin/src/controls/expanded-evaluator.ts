@@ -85,7 +85,8 @@ export class ExpandedEvaluator {
       return { ...def, result: 'SKIP', evidence: `Collector error: ${r.ollama.error}`, remediation: def.remediation };
     }
     if (r.ollama.bound_to_public) {
-      return { ...def, result: 'FAIL', evidence: `Ollama bound to ${r.ollama.host ?? '0.0.0.0'} (externally accessible)`, remediation: def.remediation };
+      const host = r.ollama.host ?? '0.0.0.0';
+      return { ...def, result: 'FAIL', evidence: `Ollama bound to ${host}:${r.ollama.port} (externally accessible)`, remediation: def.remediation };
     }
     return { ...def, result: 'PASS', evidence: 'Ollama not bound to public interface', remediation: def.remediation };
   }
@@ -131,14 +132,32 @@ export class ExpandedEvaluator {
     if (!r.cloudflare_tunnel.ok) {
       return { ...def, result: 'ERROR', evidence: `Collector error: ${r.cloudflare_tunnel.error}`, remediation: def.remediation };
     }
+
+    const otherTunnels = r.cloudflare_tunnel.other_tunnels_detected;
+    const hasOtherTunnels = otherTunnels.length > 0;
+    const otherList = otherTunnels.join(', ');
+
     if (!r.cloudflare_tunnel.tunnel_found) {
+      if (hasOtherTunnels) {
+        return { ...def, result: 'SKIP', evidence: `No Cloudflare tunnel config found. Other tunnel processes detected: ${otherList} — authentication cannot be automatically verified`, remediation: def.remediation };
+      }
       return { ...def, result: 'SKIP', evidence: 'No Cloudflare tunnel configuration found', remediation: def.remediation };
     }
+
     if (r.cloudflare_tunnel.unauthenticated_hostnames.length > 0) {
       const hosts = r.cloudflare_tunnel.unauthenticated_hostnames.join(', ');
-      return { ...def, result: 'FAIL', evidence: `Unauthenticated tunnel hostnames: ${hosts}`, remediation: def.remediation };
+      let evidence = `Unauthenticated tunnel hostnames: ${hosts}`;
+      if (hasOtherTunnels) {
+        evidence += `; Other tunnel processes detected: ${otherList}`;
+      }
+      return { ...def, result: 'FAIL', evidence, remediation: def.remediation };
     }
-    return { ...def, result: 'PASS', evidence: 'All tunnel ingress rules require authentication', remediation: def.remediation };
+
+    let evidence = 'All tunnel ingress rules require authentication';
+    if (hasOtherTunnels) {
+      evidence += `; Note: other tunnel processes detected (${otherList}) — verify authentication manually`;
+    }
+    return { ...def, result: 'PASS', evidence, remediation: def.remediation };
   }
 
   private evalDocker(r: ExpandedCollectorResult): ExpandedEvaluation {

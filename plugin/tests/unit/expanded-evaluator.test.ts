@@ -7,11 +7,11 @@ import type { ExpandedCollectorResult } from '../../src/types';
 
 function makeBaseResult(): ExpandedCollectorResult {
   return {
-    ollama: { ok: true, bound_to_public: false, host: '127.0.0.1', error: null },
+    ollama: { ok: true, bound_to_public: false, host: '127.0.0.1', port: 11434, error: null },
     network: { ok: true, exposed_ports: [], error: null },
     secrets_files: { ok: true, findings: [], error: null },
     secrets_history: { ok: true, findings: [], error: null },
-    cloudflare_tunnel: { ok: true, tunnel_found: false, unauthenticated_hostnames: [], error: null },
+    cloudflare_tunnel: { ok: true, tunnel_found: false, unauthenticated_hostnames: [], other_tunnels_detected: [], error: null },
     docker: { ok: true, docker_available: false, containers: [], error: null },
     os_updates: { ok: true, platform: 'macos', auto_updates_enabled: true, error: null },
     disk_encryption: { ok: true, platform: 'macos', encrypted: true, error: null },
@@ -38,7 +38,7 @@ describe('ExpandedEvaluator', () => {
 
     it('FAIL when ollama bound to 0.0.0.0', () => {
       const r = makeBaseResult();
-      r.ollama = { ok: true, bound_to_public: true, host: '0.0.0.0', error: null };
+      r.ollama = { ok: true, bound_to_public: true, host: '0.0.0.0', port: 11434, error: null };
       const evals = evaluator.evaluate(r);
       const e = evals.find(e => e.control_id === 'NC-OLLAMA-001')!;
       expect(e.result).toBe('FAIL');
@@ -46,7 +46,7 @@ describe('ExpandedEvaluator', () => {
 
     it('SKIP when collector fails', () => {
       const r = makeBaseResult();
-      r.ollama = { ok: false, bound_to_public: false, host: null, error: 'timeout' };
+      r.ollama = { ok: false, bound_to_public: false, host: null, port: 11434, error: 'timeout' };
       const evals = evaluator.evaluate(r);
       const e = evals.find(e => e.control_id === 'NC-OLLAMA-001')!;
       expect(e.result).toBe('SKIP');
@@ -139,6 +139,7 @@ describe('ExpandedEvaluator', () => {
         ok: true,
         tunnel_found: true,
         unauthenticated_hostnames: [],
+        other_tunnels_detected: [],
         error: null,
       };
       const evals = evaluator.evaluate(r);
@@ -152,6 +153,7 @@ describe('ExpandedEvaluator', () => {
         ok: true,
         tunnel_found: true,
         unauthenticated_hostnames: ['app.example.com'],
+        other_tunnels_detected: [],
         error: null,
       };
       const evals = evaluator.evaluate(r);
@@ -292,7 +294,7 @@ describe('ExpandedEvaluator', () => {
     const r = makeBaseResult();
     // Set docker and tunnel to available+clean to get PASS instead of SKIP
     r.docker = { ok: true, docker_available: true, containers: [], error: null };
-    r.cloudflare_tunnel = { ok: true, tunnel_found: true, unauthenticated_hostnames: [], error: null };
+    r.cloudflare_tunnel = { ok: true, tunnel_found: true, unauthenticated_hostnames: [], other_tunnels_detected: [], error: null };
 
     const evals = evaluator.evaluate(r);
     const passes = evals.filter(e => e.result === 'PASS');

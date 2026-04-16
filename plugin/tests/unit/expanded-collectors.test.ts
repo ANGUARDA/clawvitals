@@ -25,7 +25,7 @@ jest.mock('node:os', () => ({
 }));
 
 import { collectOllama } from '../../src/collectors/expanded/ollama';
-import { collectNetwork } from '../../src/collectors/expanded/network';
+import { collectNetwork, MANAGEMENT_PORTS } from '../../src/collectors/expanded/network';
 import { collectSecretsFiles } from '../../src/collectors/expanded/secrets-files';
 import { collectSecretsHistory } from '../../src/collectors/expanded/secrets-history';
 import { collectCloudflareTunnel } from '../../src/collectors/expanded/cloudflare-tunnel';
@@ -40,6 +40,7 @@ beforeEach(() => {
   mockReadFileSync.mockReturnValue('');
   mockHomedir.mockReturnValue('/home/testuser');
   mockPlatform.mockReturnValue('darwin');
+  delete process.env.OLLAMA_HOST;
 });
 
 // ── Ollama ────────────────────────────────────────────────────────
@@ -50,6 +51,7 @@ describe('collectOllama', () => {
     const result = collectOllama();
     expect(result.ok).toBe(true);
     expect(result.bound_to_public).toBe(false);
+    expect(result.port).toBe(11434);
   });
 
   it('detects ollama bound to 0.0.0.0', () => {
@@ -60,6 +62,7 @@ describe('collectOllama', () => {
     expect(result.ok).toBe(true);
     expect(result.bound_to_public).toBe(true);
     expect(result.host).toBe('0.0.0.0');
+    expect(result.port).toBe(11434);
   });
 
   it('detects ollama bound to localhost', () => {
@@ -69,6 +72,41 @@ describe('collectOllama', () => {
     const result = collectOllama();
     expect(result.ok).toBe(true);
     expect(result.bound_to_public).toBe(false);
+    expect(result.port).toBe(11434);
+  });
+
+  it('falls back to port 11434 when OLLAMA_HOST is not set', () => {
+    delete process.env.OLLAMA_HOST;
+    mockExecSync.mockImplementation(() => { throw new Error('no matches'); });
+    const result = collectOllama();
+    expect(result.port).toBe(11434);
+  });
+
+  it('uses port from OLLAMA_HOST="0.0.0.0:12345"', () => {
+    process.env.OLLAMA_HOST = '0.0.0.0:12345';
+    mockExecSync.mockReturnValue(
+      'COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\nollama  1234 user   3u  IPv4 0xabc 0t0  TCP *:12345 (LISTEN)\n'
+    );
+    const result = collectOllama();
+    expect(result.port).toBe(12345);
+    expect(result.bound_to_public).toBe(true);
+  });
+
+  it('uses default port when OLLAMA_HOST="127.0.0.1" (no port)', () => {
+    process.env.OLLAMA_HOST = '127.0.0.1';
+    mockExecSync.mockImplementation(() => { throw new Error('no matches'); });
+    const result = collectOllama();
+    expect(result.port).toBe(11434);
+  });
+
+  it('detects custom port bound to 0.0.0.0', () => {
+    process.env.OLLAMA_HOST = '0.0.0.0:12345';
+    mockExecSync.mockReturnValue(
+      'COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\nollama  1234 user   3u  IPv4 0xabc 0t0  TCP 0.0.0.0:12345 (LISTEN)\n'
+    );
+    const result = collectOllama();
+    expect(result.bound_to_public).toBe(true);
+    expect(result.port).toBe(12345);
   });
 });
 
@@ -93,6 +131,25 @@ describe('collectNetwork', () => {
     expect(result.ok).toBe(true);
     expect(result.exposed_ports.length).toBeGreaterThanOrEqual(1);
     expect(result.exposed_ports[0].port).toBe(22);
+  });
+
+  it('accepts custom ports array', () => {
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === 'string' && cmd.includes(':1234')) {
+        return 'COMMAND PID USER FD TYPE NODE NAME\ntest 123 user 3u IPv4 TCP *:1234 (LISTEN)\n';
+      }
+      throw new Error('no matches');
+    });
+    const result = collectNetwork([{ port: 1234, service: 'Test' }]);
+    expect(result.ok).toBe(true);
+    expect(result.exposed_ports).toHaveLength(1);
+    expect(result.exposed_ports[0].port).toBe(1234);
+    expect(result.exposed_ports[0].service).toBe('Test');
+  });
+
+  it('default MANAGEMENT_PORTS includes 8443 and 9090', () => {
+    expect(MANAGEMENT_PORTS.find(p => p.port === 8443)).toBeDefined();
+    expect(MANAGEMENT_PORTS.find(p => p.port === 9090)).toBeDefined();
   });
 });
 
@@ -179,30 +236,93 @@ describe('collectSecretsHistory', () => {
 describe('collectCloudflareTunnel', () => {
   it('returns tunnel_found=false when config does not exist', () => {
     mockExistsSync.mockReturnValue(false);
+    mockExecSync.mockImplementation(() => { throw new Error('not found'); });
     const result = collectCloudflareTunnel();
     expect(result.ok).toBe(true);
     expect(result.tunnel_found).toBe(false);
+    expect(result.other_tunnels_detected).toEqual([]);
   });
 
   it('detects unauthenticated hostname', () => {
-    mockExistsSync.mockReturnValue(true);
+    mockExistsSync.mockImplementation((p: string) => p === '/home/testuser/.cloudflared/config.yml');
     mockReadFileSync.mockReturnValue(
       'ingress:\n  - hostname: app.example.com\n    service: http://localhost:8080\n  - service: http_status:404\n'
     );
+    mockExecSync.mockImplementation(() => { throw new Error('not found'); });
     const result = collectCloudflareTunnel();
     expect(result.ok).toBe(true);
     expect(result.tunnel_found).toBe(true);
     expect(result.unauthenticated_hostnames).toContain('app.example.com');
+    expect(result.other_tunnels_detected).toEqual([]);
   });
 
   it('passes when access_required is true', () => {
-    mockExistsSync.mockReturnValue(true);
+    mockExistsSync.mockImplementation((p: string) => p === '/home/testuser/.cloudflared/config.yml');
     mockReadFileSync.mockReturnValue(
       'ingress:\n  - hostname: app.example.com\n    access_required: true\n    service: http://localhost:8080\n'
     );
+    mockExecSync.mockImplementation(() => { throw new Error('not found'); });
     const result = collectCloudflareTunnel();
     expect(result.ok).toBe(true);
     expect(result.unauthenticated_hostnames).toHaveLength(0);
+    expect(result.other_tunnels_detected).toEqual([]);
+  });
+
+  it('finds config at /etc/cloudflared/config.yml when home config missing', () => {
+    mockExistsSync.mockImplementation((p: string) => p === '/etc/cloudflared/config.yml');
+    mockReadFileSync.mockReturnValue(
+      'ingress:\n  - hostname: etc.example.com\n    service: http://localhost:3000\n'
+    );
+    mockExecSync.mockImplementation(() => { throw new Error('not found'); });
+    const result = collectCloudflareTunnel();
+    expect(result.ok).toBe(true);
+    expect(result.tunnel_found).toBe(true);
+    expect(result.unauthenticated_hostnames).toContain('etc.example.com');
+  });
+
+  it('detects ngrok in other_tunnels_detected', () => {
+    mockExistsSync.mockReturnValue(false);
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === 'string' && cmd.includes('ps aux')) {
+        return 'user  1234  0.0  0.1  ngrok http 8080\n';
+      }
+      throw new Error('not found');
+    });
+    const result = collectCloudflareTunnel();
+    expect(result.other_tunnels_detected).toContain('ngrok');
+  });
+
+  it('other_tunnels_detected is empty when ps output is clean', () => {
+    mockExistsSync.mockReturnValue(false);
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === 'string' && cmd.includes('ps aux')) {
+        return 'user  1234  0.0  0.1  node server.js\n';
+      }
+      throw new Error('not found');
+    });
+    const result = collectCloudflareTunnel();
+    expect(result.other_tunnels_detected).toEqual([]);
+  });
+
+  it('block-aware YAML: access_required before hostname still protects that hostname', () => {
+    mockExistsSync.mockImplementation((p: string) => p === '/home/testuser/.cloudflared/config.yml');
+    mockReadFileSync.mockReturnValue(
+      'ingress:\n  - access_required: true\n    hostname: protected.example.com\n    service: http://localhost:8080\n'
+    );
+    mockExecSync.mockImplementation(() => { throw new Error('not found'); });
+    const result = collectCloudflareTunnel();
+    expect(result.unauthenticated_hostnames).toHaveLength(0);
+  });
+
+  it('block-aware YAML: access_required in one block does NOT protect a different hostname', () => {
+    mockExistsSync.mockImplementation((p: string) => p === '/home/testuser/.cloudflared/config.yml');
+    mockReadFileSync.mockReturnValue(
+      'ingress:\n  - hostname: protected.example.com\n    access_required: true\n    service: http://localhost:8080\n  - hostname: unprotected.example.com\n    service: http://localhost:9090\n'
+    );
+    mockExecSync.mockImplementation(() => { throw new Error('not found'); });
+    const result = collectCloudflareTunnel();
+    expect(result.unauthenticated_hostnames).not.toContain('protected.example.com');
+    expect(result.unauthenticated_hostnames).toContain('unprotected.example.com');
   });
 });
 

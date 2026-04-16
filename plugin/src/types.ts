@@ -458,6 +458,7 @@ export interface OllamaResult {
   ok: boolean;
   bound_to_public: boolean;
   host: string | null;
+  port: number;
   error: string | null;
 }
 
@@ -501,6 +502,7 @@ export interface CloudflareTunnelResult {
   ok: boolean;
   tunnel_found: boolean;
   unauthenticated_hostnames: string[];
+  other_tunnels_detected: string[];
   error: string | null;
 }
 

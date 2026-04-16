@@ -1,7 +1,7 @@
 /**
  * network.ts — Scans for management ports exposed beyond localhost.
  *
- * Checks ports 22, 2375, 2376, 8080, and 9000. Uses `lsof` first,
+ * Checks a configurable list of management ports. Uses `lsof` first,
  * falling back to `ss` on Linux. Only flags ports bound to 0.0.0.0/[::]/*
  * as exposed — localhost-only bindings are not reported.
  */
@@ -9,12 +9,17 @@
 import { execSync } from 'node:child_process';
 import type { NetworkResult, ExposedPort } from '../../types';
 
-const MANAGEMENT_PORTS: Array<{ port: number; service: string }> = [
+export const MANAGEMENT_PORTS: Array<{ port: number; service: string }> = [
   { port: 22, service: 'SSH' },
   { port: 2375, service: 'Docker API (plaintext)' },
   { port: 2376, service: 'Docker API (TLS)' },
+  { port: 4000, service: 'Dev/Admin Server' },
+  { port: 5000, service: 'API/Dev Server' },
   { port: 8080, service: 'HTTP Proxy/Admin' },
+  { port: 8443, service: 'HTTPS Admin' },
+  { port: 8888, service: 'Jupyter/Admin' },
   { port: 9000, service: 'Management Console' },
+  { port: 9090, service: 'Prometheus/Admin' },
 ];
 
 /** Attempt to detect a port's bind address via lsof. Returns null if lsof is unavailable. */
@@ -57,12 +62,14 @@ function trySs(port: number): { bound: boolean; bind: string } | null {
 /**
  * Scan management ports for external exposure.
  * Returns a list of ports bound to wildcard addresses (0.0.0.0/[::]).
+ * @param ports - Optional custom port list. Defaults to MANAGEMENT_PORTS.
  */
-export function collectNetwork(): NetworkResult {
+export function collectNetwork(ports?: Array<{ port: number; service: string }>): NetworkResult {
   try {
+    const portList = ports ?? MANAGEMENT_PORTS;
     const exposed: ExposedPort[] = [];
 
-    for (const { port, service } of MANAGEMENT_PORTS) {
+    for (const { port, service } of portList) {
       const result = tryLsof(port) ?? trySs(port);
       if (result?.bound) {
         exposed.push({ port, service, bind: result.bind });

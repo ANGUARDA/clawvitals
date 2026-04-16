@@ -45,7 +45,7 @@ export class ExpandedCollectorOrchestrator {
     return {
       ollama: ollamaResult.status === 'fulfilled'
         ? ollamaResult.value
-        : errorResult(ollamaResult.reason, { ok: false, bound_to_public: false, host: null, error: null }),
+        : errorResult(ollamaResult.reason, { ok: false, bound_to_public: false, host: null, port: 11434, error: null }),
       network: networkResult.status === 'fulfilled'
         ? networkResult.value
         : errorResult(networkResult.reason, { ok: false, exposed_ports: [], error: null }),
@@ -57,7 +57,7 @@ export class ExpandedCollectorOrchestrator {
         : errorResult(secretsHistoryResult.reason, { ok: false, findings: [], error: null }),
       cloudflare_tunnel: cloudflareTunnelResult.status === 'fulfilled'
         ? cloudflareTunnelResult.value
-        : errorResult(cloudflareTunnelResult.reason, { ok: false, tunnel_found: false, unauthenticated_hostnames: [], error: null }),
+        : errorResult(cloudflareTunnelResult.reason, { ok: false, tunnel_found: false, unauthenticated_hostnames: [], other_tunnels_detected: [], error: null }),
       docker: dockerResult.status === 'fulfilled'
         ? dockerResult.value
         : errorResult(dockerResult.reason, { ok: false, docker_available: false, containers: [], error: null }),
