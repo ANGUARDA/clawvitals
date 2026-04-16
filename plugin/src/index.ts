@@ -52,7 +52,7 @@ import { formatSummary } from './reporting/summary.js';
 import { formatDetail } from './reporting/detail.js';
 import type { DeltaResult, ExpandedEvaluation } from './types.js';
 import { CRON_JOB_NAME, PLUGIN_VERSION } from './constants.js';
-import { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS, EXPANDED_SCAN_PATTERNS, STANDARD_SCAN_PATTERNS, parseMode } from './intents.js';
+import { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS, EXPANDED_SCAN_PATTERNS, STANDARD_SCAN_PATTERNS, HELP_PATTERNS, parseMode } from './intents.js';
 import { PluginTelemetryClient } from './telemetry.js';
 import { evaluateAlert, resolveAlertConfig } from './alerts.js';
 import type { ScanSnapshot } from './alerts.js';
@@ -254,7 +254,7 @@ function pluginHeader(): string {
 // the plugin intercepts them before the skill (or LLM) gets a chance.
 
 // Re-export for convenience (consumers can import from either location)
-export { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS, EXPANDED_SCAN_PATTERNS, STANDARD_SCAN_PATTERNS, parseMode } from './intents.js';
+export { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS, EXPANDED_SCAN_PATTERNS, STANDARD_SCAN_PATTERNS, HELP_PATTERNS, parseMode } from './intents.js';
 
 // ── Manual scan runner ────────────────────────────────────────────────────
 
@@ -262,9 +262,9 @@ export { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS, EXPANDED_SCAN_PATTERNS, 
  * Run a manual (user-triggered) scan.
  * Returns the full formatted output including the plugin header.
  */
-async function runManualScan(workspaceDir: string, detailed: boolean, mode: 'standard' | 'expanded' = 'standard'): Promise<string> {
+async function runManualScan(workspaceDir: string, detailed: boolean, mode: 'standard' | 'expanded' = 'standard', extra_ports?: Array<{ port: number; service: string }>): Promise<string> {
   const orchestrator = buildScanDependencies(workspaceDir);
-  const report = await orchestrator.run({ isScheduled: false, mode });
+  const report = await orchestrator.run({ isScheduled: false, mode, extra_ports });
 
   // Fire plugin telemetry
   const pluginConfig = loadConfig();
@@ -363,6 +363,48 @@ function nextCronDescription(cron: string, enabled: boolean): string {
   if (!enabled) return 'N/A (disabled)';
   if (cron === DEFAULT_CRON) return 'daily at 9:00 AM';
   return `per schedule: \`${cron}\``;
+}
+
+/** Full command reference returned by "clawvitals help". */
+function getHelpText(): string {
+  return `ClawVitals Plugin — Command Reference
+
+SCAN COMMANDS
+  run clawvitals              Standard scan — 9 stable controls, scored
+  run clawvitals --expanded   Expanded scan — adds 8 system-level checks (Ollama, network ports, tunnels, Docker, secrets, disk encryption, OS updates)
+  run clawvitals --standard   Explicit standard scan (same as default)
+  show clawvitals details     Full detail report with remediation steps for all controls
+
+CONFIGURATION
+  clawvitals status           Show current plugin status (schedule, telemetry, alias, install ID)
+  clawvitals help             Show this command reference
+
+AGENT TOOLS (callable by the agent, not as chat messages)
+  clawvitals_set_alias        Set a display name for this install on the dashboard (max 64 chars)
+  clawvitals_show_identity    Show install ID, alias, and total pings
+  clawvitals_telemetry        Enable or disable anonymous telemetry
+  clawvitals_set_schedule     Set recurring scan schedule (cron expression)
+  clawvitals_status           Show plugin status
+  clawvitals_trial_status     Check Pro trial status
+  clawvitals_upgrade          Start the Pro upgrade flow
+  clawvitals_configure_webhook  Set webhook URL for trial reminders and alerts
+  clawvitals_exclude          Suppress a control (with reason and optional expiry)
+  clawvitals_list_exclusions  List active control exclusions
+  clawvitals_remove_exclusion  Remove an exclusion by control ID
+  clawvitals_get_report       Retrieve a past scan report
+  clawvitals_approve_cognitive_file  Approve a cognitive file for use
+
+NC-NET-001 CONFIGURATION (extra ports)
+  By default NC-NET-001 scans: 22 (SSH), 2375/2376 (Docker API), 4000, 5000, 8080, 8443, 8888, 9000, 9090
+  To scan additional ports, add to your plugin config (~/.openclaw/plugins/clawvitals/config.json):
+    { "network": { "extra_ports": [{ "port": 3001, "service": "My service" }] } }
+  Extra ports are merged with the defaults — they do not replace them.
+
+LINKS
+  Docs:      https://clawvitals.io/docs
+  Controls:  https://clawvitals.io/docs/controls
+  Dashboard: https://clawvitals.io/dashboard
+  GitHub:    https://github.com/ANGUARDA/clawvitals`;
 }
 
 // ── Agent API helpers ──────────────────────────────────────────────────────
@@ -1027,6 +1069,11 @@ const clawvitalsPlugin = {
         }
       }
 
+      // ── User: help ──────────────────────────────────────────────────
+      if (matchesIntent(prompt, HELP_PATTERNS)) {
+        return { prependContext: getHelpText() };
+      }
+
       // ── User: detail report request ────────────────────────────────────
       if (matchesIntent(prompt, DETAIL_PATTERNS)) {
         try {
@@ -1043,7 +1090,9 @@ const clawvitalsPlugin = {
       // ── User: expanded scan ─────────────────────────────────────────────
       if (matchesIntent(prompt, EXPANDED_SCAN_PATTERNS)) {
         try {
-          const output = await runManualScan(workspaceDir, /* detailed */ false, 'expanded');
+          const config = loadConfig();
+          const extra_ports = config.network?.extra_ports;
+          const output = await runManualScan(workspaceDir, /* detailed */ false, 'expanded', extra_ports);
           return { prependContext: output };
         } catch (err) {
           return {

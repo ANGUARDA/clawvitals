@@ -29,6 +29,13 @@ export const EXPANDED_SCAN_PATTERNS: readonly string[] = [
   'clawvitals expanded',
 ];
 
+/** Patterns that trigger the help command. */
+export const HELP_PATTERNS: readonly string[] = [
+  'clawvitals help',
+  'clawvitals commands',
+  'clawvitals --help',
+];
+
 /** Patterns that trigger an explicit standard scan (--standard flag). */
 export const STANDARD_SCAN_PATTERNS: readonly string[] = [
   'run clawvitals --standard',

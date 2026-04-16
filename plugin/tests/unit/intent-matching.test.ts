@@ -4,7 +4,7 @@
  * These tests verify that the plugin correctly identifies scan commands
  * and intercepts them before the LLM/skill can handle them.
  */
-import { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS } from '../../src/intents';
+import { matchesIntent, SCAN_PATTERNS, DETAIL_PATTERNS, HELP_PATTERNS } from '../../src/intents';
 
 describe('matchesIntent', () => {
   describe('scan patterns', () => {
@@ -76,6 +76,24 @@ describe('matchesIntent', () => {
 
     it('does not match partial word (clawvital without s)', () => {
       expect(matchesIntent('run clawvital', SCAN_PATTERNS)).toBe(false);
+    });
+  });
+
+  describe('help patterns', () => {
+    it('matches "clawvitals help"', () => {
+      expect(matchesIntent('clawvitals help', HELP_PATTERNS)).toBe(true);
+    });
+
+    it('matches "clawvitals --help"', () => {
+      expect(matchesIntent('clawvitals --help', HELP_PATTERNS)).toBe(true);
+    });
+
+    it('matches "clawvitals commands"', () => {
+      expect(matchesIntent('clawvitals commands', HELP_PATTERNS)).toBe(true);
+    });
+
+    it('does not match "run clawvitals"', () => {
+      expect(matchesIntent('run clawvitals', HELP_PATTERNS)).toBe(false);
     });
   });
 

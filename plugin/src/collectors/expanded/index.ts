@@ -13,6 +13,7 @@ import { collectCloudflareTunnel } from './cloudflare-tunnel';
 import { collectDocker } from './docker';
 import { collectOsUpdates } from './os-updates';
 import { collectDiskEncryption } from './disk-encryption';
+import { MANAGEMENT_PORTS } from './network';
 
 /** Build a fallback result when a collector's Promise rejects unexpectedly. */
 function errorResult<T>(reason: unknown, defaults: T): T {
@@ -21,7 +22,7 @@ function errorResult<T>(reason: unknown, defaults: T): T {
 }
 
 export class ExpandedCollectorOrchestrator {
-  async collect(): Promise<ExpandedCollectorResult> {
+  async collect(options?: { extra_ports?: Array<{ port: number; service: string }> }): Promise<ExpandedCollectorResult> {
     const [
       ollamaResult,
       networkResult,
@@ -33,7 +34,7 @@ export class ExpandedCollectorOrchestrator {
       diskEncryptionResult,
     ] = await Promise.allSettled([
       Promise.resolve(collectOllama()),
-      Promise.resolve(collectNetwork()),
+      Promise.resolve(collectNetwork(options?.extra_ports ? [...MANAGEMENT_PORTS, ...options.extra_ports] : undefined)),
       Promise.resolve(collectSecretsFiles()),
       Promise.resolve(collectSecretsHistory()),
       Promise.resolve(collectCloudflareTunnel()),

@@ -23,6 +23,13 @@ export interface PluginConfig {
     threshold?: 'critical' | 'high' | 'medium' | 'low' | 'info';
   };
   retention_days?: number;
+  network?: {
+    /** Additional ports to scan in NC-NET-001, beyond the defaults.
+     *  Each entry needs port (number) and service (human-readable label).
+     *  Example: [{ "port": 3001, "service": "Slack server" }]
+     */
+    extra_ports?: Array<{ port: number; service: string }>;
+  };
 }
 
 export interface TelemetryPingParams {

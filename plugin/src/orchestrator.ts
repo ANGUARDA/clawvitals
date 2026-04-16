@@ -36,6 +36,8 @@ export interface ScanOptions {
   isScheduled: boolean;
   /** Scan mode: "standard" runs only OpenClaw checks, "expanded" adds system-level checks */
   mode?: 'standard' | 'expanded';
+  /** Extra ports to scan for NC-NET-001, merged with MANAGEMENT_PORTS */
+  extra_ports?: Array<{ port: number; service: string }>;
 }
 
 /**
@@ -107,7 +109,7 @@ export class ScanOrchestrator {
           const expandedOrchestrator = new ExpandedCollectorOrchestrator();
           const [standardResult, expResult] = await Promise.all([
             this.collector.collect(),
-            expandedOrchestrator.collect(),
+            expandedOrchestrator.collect({ extra_ports: options.extra_ports }),
           ]);
           collected = standardResult;
           expandedResult = expResult;

@@ -151,6 +151,24 @@ describe('collectNetwork', () => {
     expect(MANAGEMENT_PORTS.find(p => p.port === 8443)).toBeDefined();
     expect(MANAGEMENT_PORTS.find(p => p.port === 9090)).toBeDefined();
   });
+
+  it('extra_ports merge with defaults when passed via spread', () => {
+    const extra = [{ port: 3001, service: 'Slack server' }];
+    const merged = [...MANAGEMENT_PORTS, ...extra];
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (typeof cmd === 'string' && cmd.includes(':3001')) {
+        return 'COMMAND PID USER FD TYPE NODE NAME\nslack 999 user 3u IPv4 TCP *:3001 (LISTEN)\n';
+      }
+      throw new Error('no matches');
+    });
+    const result = collectNetwork(merged);
+    expect(result.ok).toBe(true);
+    expect(result.exposed_ports).toHaveLength(1);
+    expect(result.exposed_ports[0].port).toBe(3001);
+    expect(result.exposed_ports[0].service).toBe('Slack server');
+    // Defaults are still in the port list
+    expect(merged.length).toBe(MANAGEMENT_PORTS.length + 1);
+  });
 });
 
 // ── Secrets Files ────────────────────────────────────────────────
