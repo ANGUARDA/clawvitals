@@ -1,5 +1,5 @@
 {
-  "name": "@bk-cm/clawvitals",
+  "name": "claw-security-vitals",
   "version": "1.0.0",
   "description": "ClawVitals plugin \u2014 recurring scans, posture history, and fleet dashboard",
   "type": "module",
@@ -13,6 +13,9 @@
       "pluginApi": ">=2026.3.0",
       "builtWith": "2026.3.13",
       "sdk": "2026.3.13"
+    },
+    "build": {
+      "openclawVersion": "2026.3.13"
     }
   },
   "scripts": {
