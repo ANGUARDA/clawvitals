@@ -1,7 +1,7 @@
 {
   "name": "claw-security-vitals",
   "version": "1.0.0",
-  "description": "ClawVitals plugin \u2014 recurring scans, posture history, and fleet dashboard",
+  "description": "Security vitals checker for OpenClaw, providing enhanced checks and functionality beyond the ClawVitals skill (https://clawhub.ai/bk-cm/clawvitals). Checks your installation for common misconfigurations and security issues, with scheduled scans, delta detection, regression alerts, and scan history. Full details: https://clawvitals.io/plugin",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -47,5 +47,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/ANGUARDA/clawvitals"
-  }
+  },
+  "files": [
+    "dist/",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ]
 }
