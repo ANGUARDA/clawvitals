@@ -59,6 +59,11 @@ function trySs(port: number): { bound: boolean; bind: string } | null {
   }
 }
 
+/** Validate that a port entry has a safe integer port in 1-65535. */
+function isValidPort(entry: { port: number; service: string }): boolean {
+  return Number.isInteger(entry.port) && entry.port >= 1 && entry.port <= 65535;
+}
+
 /**
  * Scan management ports for external exposure.
  * Returns a list of ports bound to wildcard addresses (0.0.0.0/[::]).
@@ -67,16 +72,21 @@ function trySs(port: number): { bound: boolean; bind: string } | null {
 export function collectNetwork(ports?: Array<{ port: number; service: string }>): NetworkResult {
   try {
     const portList = ports ?? MANAGEMENT_PORTS;
+    const invalid = portList.filter(e => !isValidPort(e));
+    const validPorts = portList.filter(isValidPort);
     const exposed: ExposedPort[] = [];
 
-    for (const { port, service } of portList) {
+    for (const { port, service } of validPorts) {
       const result = tryLsof(port) ?? trySs(port);
       if (result?.bound) {
         exposed.push({ port, service, bind: result.bind });
       }
     }
 
-    return { ok: true, exposed_ports: exposed, error: null };
+    const error = invalid.length > 0
+      ? `Skipped invalid extra_ports: ${invalid.map(e => JSON.stringify(e.port)).join(', ')} (must be integer 1-65535)`
+      : null;
+    return { ok: true, exposed_ports: exposed, error };
   } catch (err) {
     return { ok: false, exposed_ports: [], error: (err as Error).message };
   }

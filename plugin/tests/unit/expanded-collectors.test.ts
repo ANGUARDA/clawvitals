@@ -169,6 +169,37 @@ describe('collectNetwork', () => {
     // Defaults are still in the port list
     expect(merged.length).toBe(MANAGEMENT_PORTS.length + 1);
   });
+
+  it('skips invalid extra_ports (string, negative, out of range) and reports error', () => {
+    mockExecSync.mockImplementation(() => { throw new Error('no matches'); });
+    const ports = [
+      { port: 3001, service: 'Valid' },
+      { port: -1, service: 'Negative' },
+      { port: 99999, service: 'Too high' },
+      { port: 0, service: 'Zero' },
+      { port: NaN, service: 'NaN' },
+      { port: 1.5, service: 'Float' },
+      { port: 443, service: 'HTTPS' },
+    ];
+    const result = collectNetwork(ports);
+    expect(result.ok).toBe(true);
+    // Only 3001 and 443 are valid
+    expect(result.error).toContain('Skipped invalid extra_ports');
+    expect(result.error).toContain('-1');
+    expect(result.error).toContain('99999');
+  });
+
+  it('accepts all valid ports without error', () => {
+    mockExecSync.mockImplementation(() => { throw new Error('no matches'); });
+    const ports = [
+      { port: 1, service: 'Min' },
+      { port: 65535, service: 'Max' },
+      { port: 8080, service: 'HTTP' },
+    ];
+    const result = collectNetwork(ports);
+    expect(result.ok).toBe(true);
+    expect(result.error).toBeNull();
+  });
 });
 
 // ── Secrets Files ────────────────────────────────────────────────

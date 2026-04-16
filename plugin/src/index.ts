@@ -392,8 +392,6 @@ AGENT TOOLS (callable by the agent, not as chat messages)
   clawvitals_list_exclusions  List active control exclusions
   clawvitals_remove_exclusion  Remove an exclusion by control ID
   clawvitals_get_report       Retrieve a past scan report
-  clawvitals_approve_cognitive_file  Approve a cognitive file for use
-
 NC-NET-001 CONFIGURATION (extra ports)
   By default NC-NET-001 scans: 22 (SSH), 2375/2376 (Docker API), 4000, 5000, 8080, 8443, 8888, 9000, 9090
   To scan additional ports, add to your plugin config (~/.openclaw/plugins/clawvitals/config.json):

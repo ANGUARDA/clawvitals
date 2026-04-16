@@ -11,7 +11,7 @@
 set -euo pipefail
 
 TELEMETRY_URL="https://telemetry.clawvitals.io/ping"
-AGENT_API_URL="https://clawvitals-agent-api.badrkhan.workers.dev"
+AGENT_API_URL="https://clawvitals-agent-api.workers.dev"
 PASS=0; FAIL=0
 
 ok() { echo "  ✅ $1"; PASS=$((PASS+1)); }

@@ -56,7 +56,7 @@ PHASE 5: Telemetry and dashboard
   [ ] Returns {"ok":true}
 
   Check dashboard (requires API_TOKEN):
-    curl -H "Authorization: Bearer $API_TOKEN" https://clawvitals-agent-api.badrkhan.workers.dev/v1/instances
+    curl -H "Authorization: Bearer $API_TOKEN" https://clawvitals-agent-api.workers.dev/v1/instances
   [ ] Your install_id appears in instances list
   [ ] last_band and last_score match your most recent scan
 
